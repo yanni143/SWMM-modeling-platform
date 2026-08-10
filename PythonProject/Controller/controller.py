@@ -1,4 +1,3 @@
-import os
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -7,15 +6,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from Service.OutProcessService import out_process_service
 from Service.SWMMService import SwmmService
+from config import get_settings
+from database.session import get_engine
+from storage.artifact_storage import ArtifactStorageService
 
 
-app = FastAPI(title="SWMM Modeling and Simulation API")
+settings = get_settings()
+app = FastAPI(title=settings.app_name)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,7 +36,26 @@ class RunModelRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    checks: dict[str, str] = {}
+
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "unavailable"
+
+    try:
+        storage = ArtifactStorageService()
+        storage.initialize()
+        checks["minio"] = "ok" if storage.is_available() else "unavailable"
+    except Exception:
+        checks["minio"] = "unavailable"
+
+    return {
+        "status": "ok" if all(value == "ok" for value in checks.values()) else "degraded",
+        "checks": checks,
+    }
 
 
 @app.post("/outprocess")
@@ -70,11 +93,7 @@ def get_simulation_result(project_id: str, out_id: str, filename: str) -> FileRe
     This local implementation remains as a compatibility layer until run artifacts
     are persisted to MinIO in the storage refactor.
     """
-    output_root = os.getenv("PROCESS_OUTPUT_DIR")
-    if not output_root:
-        raise HTTPException(status_code=500, detail="未配置PROCESS_OUTPUT_DIR")
-
-    root = Path(output_root).resolve()
+    root = settings.resolved_runtime_dir
     file_path = (root / project_id / out_id / "visual" / filename).resolve()
     try:
         file_path.relative_to(root)

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fenhu-swmm-backend"
+version = "0.1.0"
+description = "SWMM model versioning, simulation, result processing, and artifact storage backend"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "alembic>=1.14,<2",
+  "fastapi>=0.115,<1",
+  "geoalchemy2>=0.17,<1",
+  "geopandas>=1.0,<2",
+  "marshmallow>=3.20,<4",
+  "marshmallow-sqlalchemy>=1.0,<2",
+  "minio>=7.2,<8",
+  "psycopg2-binary>=2.9,<3",
+  "pydantic-settings>=2.7,<3",
+  "pyswmm>=2.0,<3",
+  "python-dotenv>=1.0,<2",
+  "shapely>=2.0,<3",
+  "sqlalchemy>=2.0,<3",
+  "uvicorn[standard]>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "ruff>=0.9,<1",
+]
+
+[tool.setuptools]
+py-modules = ["config"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "Controller*",
+  "Service*",
+  "Tools*",
+  "database*",
+  "models*",
+  "storage*",
+  "swmm_core*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

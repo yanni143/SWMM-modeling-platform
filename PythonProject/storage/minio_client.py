@@ -1,20 +1,32 @@
-import os
 from datetime import timedelta
 from typing import Optional, Dict, Any
 from minio import Minio
 from minio.error import S3Error
+from urllib3 import PoolManager, Retry, Timeout
+
+from config import get_settings
 
 
 def get_minio_client() -> Minio:
-    endpoint = os.getenv("MINIO_ENDPOINT", "127.0.0.1:9000")
-    access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-    secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
-    return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+    settings = get_settings()
+    http_client = PoolManager(
+        timeout=Timeout(
+            connect=settings.minio_connect_timeout_seconds,
+            read=settings.minio_read_timeout_seconds,
+        ),
+        retries=Retry(total=1, connect=1, read=1, redirect=0),
+    )
+    return Minio(
+        settings.minio_endpoint,
+        access_key=settings.minio_access_key,
+        secret_key=settings.minio_secret_key,
+        secure=settings.minio_secure,
+        http_client=http_client,
+    )
 
 
 def ensure_bucket(client: Minio, bucket: Optional[str] = None):
-    bucket = bucket or os.getenv("MINIO_BUCKET", "inp-files")
+    bucket = bucket or get_settings().minio_bucket
     try:
         if not client.bucket_exists(bucket):
             client.make_bucket(bucket)
@@ -23,12 +35,18 @@ def ensure_bucket(client: Minio, bucket: Optional[str] = None):
         raise
 
 
-def upload_file(client: Minio, bucket: str, object_key: str, local_path: str) -> Dict[str, Any]:
+def upload_file(
+    client: Minio,
+    bucket: str,
+    object_key: str,
+    local_path: str,
+    content_type: Optional[str] = None,
+) -> Dict[str, Any]:
     """Upload a local file to MinIO and return object metadata (etag, size).
 
     Raises exceptions from Minio client on failure.
     """
-    client.fput_object(bucket, object_key, file_path=local_path)
+    client.fput_object(bucket, object_key, file_path=local_path, content_type=content_type)
     stat = client.stat_object(bucket, object_key)
     return {"etag": getattr(stat, "etag", None), "size": getattr(stat, "size", None)}
 

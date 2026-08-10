@@ -1,9 +1,6 @@
-import os
-
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
-from dotenv import load_dotenv
+from database.session import get_engine
 
 # from dao.model import Build, Lake, Road, River, River_Component, Land, Dam, Pipe_Junction, Pipe_Outfall, Pipe_Conduit, \
 #     Pipe_Coordinate, Pipe_Subcatchment, Pipe_Inflows_Direct, Dataset, Project, History_Chat, Edge_Topology, Rain
@@ -17,13 +14,11 @@ from Tools.PGTools.model import Out_Nodes, Out_Links, Out_Systems, Out_NodesSche
     River, Land, Dam, Build, LakeSchema, RoadSchema, RiverSchema, LandSchema, DamSchema, BuildSchema, Pipe_Subcatchment, \
     Out_Subcatchments, Pipe_SubcatchSchema, Out_SubcatchmentsSchema
 
-load_dotenv()
-
 class Dao:
     def __init__(self, table):
         # 创建数据库连接
         # engine = create_engine("postgresql+psycopg2://postgres:520143@localhost/postgis_35_sample")
-        engine = create_engine(os.getenv("DB_URL_NEW"))
+        engine = get_engine()
         '''
         autocommit=False: 默认情况下，不自动提交事务。这意味着你需要显式地调用 commit() 方法来提交事务。
         autoflush=False: 默认情况下，不自动刷新待插入/更新的数据。这意味着在执行查询之前，不会自动将未提交的变更写入数据库。这有助于提高性能，但也意味着你需要手动调用 flush() 方法来刷新待插入/更新的数据。

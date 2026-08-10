@@ -1,0 +1,32 @@
+# Secrets and local configuration
+**/.env
+**/.env.*
+!**/.env.example
+
+# Python
+**/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/*.egg-info/
+
+# Node / frontend build
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/coverage/
+**/*.tsbuildinfo
+
+# IDE and OS
+**/.idea/
+**/.vscode/
+**/.DS_Store
+**/Thumbs.db
+
+# Runtime workspaces and logs
+**/logs/
+**/*.log
+**/.runtime/
+

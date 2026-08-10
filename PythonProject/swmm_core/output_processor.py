@@ -1,9 +1,8 @@
 import os
 import traceback
 import geopandas as gpd
-from dotenv import load_dotenv
 from shapely.wkt import loads
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 from pyswmm import Output, NodeSeries, LinkSeries, SystemSeries
@@ -13,15 +12,12 @@ import uuid
 from Tools.PGTools.dao import Dao
 from Tools.PGTools.model import Out_Nodes, Out_Links, Out_Systems, Out_Subcatchments
 from Tools.PGTools.shp2json import to_geojson
+from config import get_settings
+from database.session import get_engine
 
-load_dotenv()
-
-# -------------------------- 数据库配置 --------------------------
-DB_URL = os.getenv('DB_URL_NEW')
 SRID = 4549
 
-# 初始化SQLAlchemy
-engine = create_engine(DB_URL, echo=False)
+engine = get_engine()
 Session = sessionmaker(bind=engine)
 
 
@@ -46,9 +42,10 @@ class OutProcess:
         self._out_file = out_file
 
         # 创建输出目录
-        self.base_output_dir = os.path.join(os.getenv("PROCESS_OUTPUT_DIR"), self._project_id, self._out_id)
-        self.temp_dir = self.base_output_dir + os.getenv("TEMP_FOLDER", "/temp/")
-        self.visual_dir = self.base_output_dir + os.getenv("VISUAL_FOLDER", "/visual/")
+        runtime_root = get_settings().resolved_runtime_dir
+        self.base_output_dir = str(runtime_root / self._project_id / self._out_id)
+        self.temp_dir = os.path.join(self.base_output_dir, "temp")
+        self.visual_dir = os.path.join(self.base_output_dir, "visual")
 
         for dir_path in [self.base_output_dir, self.temp_dir, self.visual_dir]:
             os.makedirs(dir_path, exist_ok=True)
