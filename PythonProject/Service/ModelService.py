@@ -1,5 +1,6 @@
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -8,11 +9,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import get_settings
-from models.domain import ModelVersion, SwmmModel
+from models.domain import ModelParameterChange, ModelVersion, SwmmModel
 from storage.artifact_storage import ArtifactStorageService
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpValidator import InpValidationResult, validate_inp_file
+from Tools.InpTools.InpFileHandler import INPFileHandler
+from Tools.InpTools.InpParameterEditor import apply_parameter_changes, build_parameter_catalog
 
 
 class ModelNotFoundError(LookupError):
@@ -155,6 +158,92 @@ class ModelService:
             validation.sections,
             source_crs=self.settings.swmm_input_crs,
         )
+
+    def get_parameter_catalog(self, session: Session, version_id: uuid.UUID) -> list[dict]:
+        _, validation = self._download_and_validate(session, version_id)
+        return build_parameter_catalog(validation.sections)
+
+    def create_adjusted_version(
+        self,
+        session: Session,
+        parent_version_id: uuid.UUID,
+        changes: list[dict[str, str]],
+        summary: Optional[str] = None,
+        created_by: Optional[str] = None,
+    ) -> tuple[ModelVersion, list[dict]]:
+        parent = self.get_version(session, parent_version_id)
+        model = session.get(SwmmModel, parent.model_id, with_for_update=True)
+        if not model:
+            raise ModelNotFoundError("工程不存在")
+
+        runtime_dir = self.settings.resolved_runtime_dir
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        stored = None
+        with tempfile.TemporaryDirectory(prefix="inp-adjust-", dir=runtime_dir) as directory:
+            source_path = Path(directory) / "source.inp"
+            target_path = Path(directory) / "model.inp"
+            self.storage.download_to(
+                parent.inp_object_key,
+                source_path,
+                bucket=parent.inp_bucket,
+            )
+            content, _ = INPFileHandler.read_file(str(source_path))
+            if not content:
+                raise ValueError("无法读取父版本 INP")
+            adjusted_content, applied = apply_parameter_changes(content, changes)
+            message = INPFileHandler.write_file(str(target_path), adjusted_content)
+            if message.startswith("错误"):
+                raise OSError(message)
+            validate_inp_file(target_path)
+
+            latest = session.scalar(
+                select(func.max(ModelVersion.version)).where(ModelVersion.model_id == model.id)
+            ) or 0
+            version_id = uuid.uuid4()
+            stored = self.storage.upload_model_version(target_path, model.id, version_id)
+            version = ModelVersion(
+                id=version_id,
+                model_id=model.id,
+                parent_version_id=parent.id,
+                version=latest + 1,
+                inp_bucket=stored.bucket,
+                inp_object_key=stored.object_key,
+                checksum=stored.checksum,
+                size_bytes=stored.size_bytes,
+                change_summary={
+                    "source": "parameter_adjustment",
+                    "summary": summary or f"调整 {len(applied)} 项常用参数",
+                    "change_count": len(applied),
+                },
+                created_by=created_by,
+            )
+            session.add(version)
+            session.flush()
+            session.add_all(
+                [
+                    ModelParameterChange(
+                        id=uuid.uuid4(),
+                        version_id=version.id,
+                        operation=item["operation"],
+                        section=item["section"],
+                        target=item["target"],
+                        field=item["field"],
+                        old_value=item["old_value"],
+                        new_value=item["new_value"],
+                    )
+                    for item in applied
+                ]
+            )
+            model.updated_at = datetime.now(timezone.utc)
+            try:
+                session.commit()
+                session.refresh(version)
+            except Exception:
+                session.rollback()
+                if stored:
+                    self._delete_uploaded_object(stored.object_key)
+                raise
+        return version, applied
 
     def get_download_url(self, session: Session, version_id: uuid.UUID) -> str:
         version = self.get_version(session, version_id)

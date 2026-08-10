@@ -21,6 +21,13 @@ from schemas.model import (
     VersionSectionsResponse,
     VersionLayersResponse,
 )
+from schemas.parameter import (
+    AppliedParameterChange,
+    CreateAdjustedVersionRequest,
+    CreateAdjustedVersionResponse,
+    EditableGroup,
+    ParameterCatalogResponse,
+)
 from Service.ModelService import (
     ModelNameConflictError,
     ModelNotFoundError,
@@ -173,6 +180,49 @@ def get_version_layers(
     try:
         layers = ModelService().get_geometry_layers(session, version_id)
         return VersionLayersResponse(version_id=version_id, layers=layers)
+    except Exception as exc:
+        raise translate_service_error(exc) from exc
+
+
+@router.get(
+    "/model-versions/{version_id}/editable-parameters",
+    response_model=ParameterCatalogResponse,
+)
+def get_editable_parameters(
+    version_id: UUID, session: Session = Depends(get_db)
+) -> ParameterCatalogResponse:
+    try:
+        groups = ModelService().get_parameter_catalog(session, version_id)
+        return ParameterCatalogResponse(
+            version_id=version_id,
+            groups=[EditableGroup.model_validate(group) for group in groups],
+        )
+    except Exception as exc:
+        raise translate_service_error(exc) from exc
+
+
+@router.post(
+    "/model-versions/{version_id}/versions",
+    response_model=CreateAdjustedVersionResponse,
+    status_code=201,
+)
+def create_adjusted_version(
+    version_id: UUID,
+    payload: CreateAdjustedVersionRequest,
+    session: Session = Depends(get_db),
+) -> CreateAdjustedVersionResponse:
+    try:
+        version, changes = ModelService().create_adjusted_version(
+            session=session,
+            parent_version_id=version_id,
+            changes=[change.model_dump() for change in payload.changes],
+            summary=payload.summary,
+            created_by=payload.created_by,
+        )
+        return CreateAdjustedVersionResponse(
+            version=ModelVersionRead.model_validate(version),
+            changes=[AppliedParameterChange.model_validate(change) for change in changes],
+        )
     except Exception as exc:
         raise translate_service_error(exc) from exc
 

@@ -147,3 +147,4 @@ def write_result_layers(layers: list[dict], directory: str | Path) -> list[Path]
         path.write_text(json.dumps(layer["geojson"], ensure_ascii=False), encoding="utf-8")
         paths.append(path)
     return paths
+

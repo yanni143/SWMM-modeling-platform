@@ -11,7 +11,10 @@ from config import get_settings
 from models.domain import ModelVersion, RunArtifact, SimulationRun
 from Service.SWMMService import SwmmService
 from storage.artifact_storage import ArtifactStorageService, StoredObject
-from swmm_core.result_geojson import parse_result_layers, write_result_layers
+from swmm_core.result_geojson import (
+    parse_result_layers,
+    write_result_layers,
+)
 
 
 class SimulationRunError(RuntimeError):
@@ -23,7 +26,9 @@ class SimulationService:
         self.settings = get_settings()
         self.storage = storage or ArtifactStorageService()
 
-    def run_version(self, session: Session, version_id: uuid.UUID) -> tuple[SimulationRun, list[dict]]:
+    def run_version(
+        self, session: Session, version_id: uuid.UUID
+    ) -> tuple[SimulationRun, list[dict]]:
         version = session.get(ModelVersion, version_id)
         if not version:
             raise SimulationRunError("工程版本不存在")

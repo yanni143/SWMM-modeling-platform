@@ -11,7 +11,7 @@
     <ol class="process-rail" aria-label="工程准备流程">
       <li class="active"><span>01</span>导入文件</li>
       <li :class="{ active: store.selectedVersionId }"><span>02</span>初始版本</li>
-      <li :class="{ active: store.sections.length }"><span>03</span>参数索引</li>
+      <li :class="{ active: store.parameterGroups.length }"><span>03</span>安全调参</li>
     </ol>
 
     <form class="upload-form" @submit.prevent="submitImport">
@@ -59,7 +59,7 @@
     </section>
 
     <section v-if="store.versions.length" class="ledger-section">
-      <div class="section-title"><span>版本与参数分区</span><em>只读准备阶段</em></div>
+      <div class="section-title"><span>工程版本</span><em>每次调参生成新版本</em></div>
       <select
         class="ledger-select"
         :value="store.selectedVersionId || ''"
@@ -79,44 +79,8 @@
         {{ store.running ? '正在运行并解析结果…' : '运行当前版本' }}
       </button>
 
-      <div class="section-index">
-        <button
-          v-for="section in store.sections"
-          :key="section.name"
-          type="button"
-          :class="{ selected: store.selectedSectionName === section.name }"
-          @click="store.selectSection(section.name)"
-        >
-          <span>[{{ section.name }}]</span>
-          <b>{{ section.record_count }}</b>
-          <i :class="{ editable: section.editable }">{{ section.editable ? '可调' : '结构' }}</i>
-        </button>
-      </div>
     </section>
-
-    <section v-if="store.sectionDetail" class="parameter-preview">
-      <div class="section-title">
-        <span>[{{ store.sectionDetail.name }}]</span>
-        <em>{{ store.sectionDetail.record_count }} 条记录</em>
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th v-for="field in store.sectionDetail.fields" :key="field">{{ field }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="record in store.sectionDetail.records.slice(0, 30)" :key="record.index">
-              <td v-for="field in store.sectionDetail.fields" :key="field">
-                {{ record.values[field] ?? '—' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-if="store.sectionDetail.record_count > 30" class="preview-note">当前预览前 30 条记录</p>
-    </section>
+    <ParameterTuning v-if="store.selectedVersionId && store.parameterGroups.length" />
   </aside>
 </template>
 
@@ -124,6 +88,7 @@
 import { onMounted, ref } from 'vue'
 import { useModelStore } from '@/stores/modelStore'
 import eventBus from '@/eventBus'
+import ParameterTuning from './ParameterTuning.vue'
 
 const store = useModelStore()
 const modelName = ref('')

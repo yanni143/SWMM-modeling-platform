@@ -7,6 +7,11 @@ import models  # noqa: F401
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpGeoJson import build_geojson_layers
+from Tools.InpTools.InpParameterEditor import (
+    ParameterValidationError,
+    apply_parameter_changes,
+    build_parameter_catalog,
+)
 from Tools.InpTools.InpValidator import InvalidInpFile, validate_inp_file
 
 
@@ -138,6 +143,41 @@ J1 10.0 3.0 0 0 0
         self.assertAlmostEqual(point[0], 120.848921, places=5)
         self.assertAlmostEqual(point[1], 31.039645, places=5)
         self.assertEqual(layers[0]["display_crs"], "EPSG:4326")
+
+    def test_parameter_catalog_joins_safe_fields_by_object(self) -> None:
+        sections = {
+            "OPTIONS": ["INFILTRATION HORTON"],
+            "SUBCATCHMENTS": ["S1 G1 J1 1.0 40 100 1.0 0"],
+            "SUBAREAS": ["S1 0.01 0.10 1.27 2.54 25 OUTLET"],
+            "INFILTRATION": ["S1 75 10 4 7 0"],
+            "CONDUITS": ["C1 J1 J2 100 0.013 0 0 0 0"],
+            "XSECTIONS": ["C1 CIRCULAR 1.2 0 0 0 1"],
+        }
+
+        groups = build_parameter_catalog(sections)
+        subcatchment = next(group for group in groups if group["id"] == "subcatchments")
+        conduit = next(group for group in groups if group["id"] == "conduits")
+
+        self.assertGreater(len(subcatchment["objects"][0]["fields"]), 8)
+        self.assertIn(
+            "XSECTIONS.geom1",
+            [field["key"] for field in conduit["objects"][0]["fields"]],
+        )
+
+    def test_safe_parameter_change_updates_only_whitelisted_value(self) -> None:
+        content = "[CONDUITS]\nC1 J1 J2 100 0.013 0 0 0 0\n"
+        adjusted, applied = apply_parameter_changes(
+            content,
+            [{"section": "CONDUITS", "target": "C1", "field": "roughness", "new_value": "0.02"}],
+        )
+
+        self.assertIn("C1 J1 J2 100 0.02", adjusted)
+        self.assertEqual(applied[0]["old_value"], "0.013")
+        with self.assertRaises(ParameterValidationError):
+            apply_parameter_changes(
+                content,
+                [{"section": "CONDUITS", "target": "C1", "field": "from_node", "new_value": "J9"}],
+            )
 
 
 if __name__ == "__main__":

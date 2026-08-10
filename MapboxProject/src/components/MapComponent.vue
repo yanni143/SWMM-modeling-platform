@@ -178,7 +178,15 @@ export default {
       if (!feature) return this.featurePopupTool?.closePopup()
       const descriptorId = feature.layer.id.replace(/-layer$/, '')
       const descriptor = this.layers.find((layer) => layer.id === descriptorId)
-      if (descriptor) this.featurePopupTool.showFeaturePopup(feature, event.lngLat, descriptor)
+      if (descriptor) {
+        this.featurePopupTool.showFeaturePopup(feature, event.lngLat, descriptor)
+        if (descriptor.source === 'inp' && feature.properties?.name) {
+          eventBus.emit('mapFeatureSelected', {
+            layerId: descriptor.id,
+            target: feature.properties.name,
+          })
+        }
+      }
     },
 
     handleMouseMove(event) {

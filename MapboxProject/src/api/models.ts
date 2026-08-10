@@ -78,6 +78,43 @@ export interface ProjectRunResponse {
   artifacts: Array<Record<string, unknown>>
 }
 
+export interface EditableField {
+  key: string
+  section: string
+  field: string
+  label: string
+  unit: string
+  value: string
+  minimum: number
+  maximum: number
+  step: number
+}
+
+export interface EditableObject {
+  target: string
+  element_type: string
+  fields: EditableField[]
+}
+
+export interface EditableGroup {
+  id: string
+  label: string
+  map_layer: string
+  objects: EditableObject[]
+}
+
+export interface ParameterChangeInput {
+  section: string
+  target: string
+  field: string
+  new_value: string
+}
+
+export interface AdjustedVersionResponse {
+  version: ModelVersion
+  changes: Array<ParameterChangeInput & { old_value: string; label: string; unit: string }>
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, options)
   if (!response.ok) {
@@ -119,6 +156,26 @@ export async function fetchProjectLayers(versionId: string): Promise<ProjectGeoJ
 export function runProjectVersion(versionId: string): Promise<ProjectRunResponse> {
   return request(`/api/model-versions/${versionId}/runs`, { method: 'POST' })
 }
+
+export async function fetchEditableParameters(versionId: string): Promise<EditableGroup[]> {
+  const response = await request<{ groups: EditableGroup[] }>(
+    `/api/model-versions/${versionId}/editable-parameters`,
+  )
+  return response.groups
+}
+
+export function createAdjustedVersion(
+  versionId: string,
+  changes: ParameterChangeInput[],
+  summary?: string,
+): Promise<AdjustedVersionResponse> {
+  return request(`/api/model-versions/${versionId}/versions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ changes, summary }),
+  })
+}
+
 
 export function uploadModel(input: {
   name: string

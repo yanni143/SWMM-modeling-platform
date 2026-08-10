@@ -4,12 +4,16 @@ import {
   fetchSection,
   fetchSections,
   fetchVersions,
+  fetchEditableParameters,
+  createAdjustedVersion,
   runProjectVersion,
   uploadModel,
   type ModelSummary,
   type ModelVersion,
   type SectionDetail,
   type SectionSummary,
+  type EditableGroup,
+  type ParameterChangeInput,
 } from '@/api/models'
 
 interface ModelState {
@@ -23,6 +27,8 @@ interface ModelState {
   loading: boolean
   uploading: boolean
   running: boolean
+  savingVersion: boolean
+  parameterGroups: EditableGroup[]
   error: string | null
 }
 
@@ -38,6 +44,8 @@ export const useModelStore = defineStore('model-library', {
     loading: false,
     uploading: false,
     running: false,
+    savingVersion: false,
+    parameterGroups: [],
     error: null,
   }),
   getters: {
@@ -83,6 +91,7 @@ export const useModelStore = defineStore('model-library', {
       this.error = null
       try {
         this.sections = await fetchSections(versionId)
+        this.parameterGroups = await fetchEditableParameters(versionId)
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'INP 分区读取失败'
       } finally {
@@ -131,6 +140,24 @@ export const useModelStore = defineStore('model-library', {
         return null
       } finally {
         this.running = false
+      }
+    },
+    async saveAdjustedVersion(changes: ParameterChangeInput[], summary?: string) {
+      if (!this.selectedVersionId || !this.selectedModelId) return null
+      const parentVersionId = this.selectedVersionId
+      this.savingVersion = true
+      this.error = null
+      try {
+        const result = await createAdjustedVersion(parentVersionId, changes, summary)
+        this.versions = await fetchVersions(this.selectedModelId)
+        await this.selectVersion(result.version.id)
+        await this.loadModels()
+        return { ...result, parentVersionId }
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : '新版本生成失败'
+        return null
+      } finally {
+        this.savingVersion = false
       }
     },
   },

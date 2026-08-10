@@ -24,7 +24,7 @@
 - MinIO 默认私有 bucket：`swmm-artifacts`。
 - 工程版本：`models/{model_id}/versions/{version_id}/model.inp`（对象路径暂保持兼容）。
 - 运行输入：`runs/{run_id}/input/model.inp`。
-- 运行产物：`runs/{run_id}/{raw|visual|summary}/{filename}`。
+- 运行产物：`runs/{run_id}/{input|raw|visual}/{filename}`。
 
 SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP、OUT、RPT、日志和可视化文件必须进入 MinIO。
 
@@ -38,6 +38,12 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 4. 提供版本列表、参数分区索引和分区记录预览，为后续普通表单调参建立输入边界。
 
 选择工程版本后可调用 `POST /api/model-versions/{version_id}/runs`。后端从 MinIO 下载 INP，在临时目录运行 PySWMM，解析 OUT，并将输入、OUT、RPT 和结果 GeoJSON 全部写回 MinIO。临时目录会在请求结束后删除。
+
+## 安全调参流程
+
+调参只开放白名单中的常用低风险字段：子汇水区面积/不透水率/宽度/坡度、地表曼宁系数与洼蓄量、常用下渗参数、节点与排口高程、节点最大深度、管线长度/粗糙度以及圆管管径。拓扑、控制规则和复杂断面不开放修改。
+
+前端通过地图或对象列表选择要素，后端再次执行白名单和范围校验。保存时不会覆盖原始 INP，而是生成带父版本关系的新版本，并把逐项旧值/新值写入 `model_parameter_changes`。新版本可以直接运行并加载结果图层。
 
 主要接口位于 `/api/models` 和 `/api/model-versions/{version_id}`。当前阶段参数预览只读，修改参数并生成新版本属于下一阶段。
 
