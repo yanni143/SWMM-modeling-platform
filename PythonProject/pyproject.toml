@@ -19,6 +19,7 @@ dependencies = [
   "pydantic-settings>=2.7,<3",
   "pyswmm>=2.0,<3",
   "python-dotenv>=1.0,<2",
+  "python-multipart>=0.0.20,<1",
   "shapely>=2.0,<3",
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.30,<1",
@@ -51,4 +52,3 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

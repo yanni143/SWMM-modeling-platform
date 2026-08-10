@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from Service.OutProcessService import out_process_service
 from Service.SWMMService import SwmmService
+from Controller.model_routes import router as model_router
 from config import get_settings
 from database.session import get_engine
 from storage.artifact_storage import ArtifactStorageService
@@ -24,6 +25,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(model_router)
 
 
 class RunModelRequest(BaseModel):

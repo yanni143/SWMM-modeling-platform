@@ -106,18 +106,31 @@ class ArtifactStorageService:
             object_key=ArtifactKeyBuilder.run_artifact(run_id, category, filename),
         )
 
-    def download_to(self, object_key: str, destination: str | Path) -> Path:
+    def download_to(
+        self,
+        object_key: str,
+        destination: str | Path,
+        bucket: Optional[str] = None,
+    ) -> Path:
         path = Path(destination).resolve()
-        download_file(self.client, self.bucket, object_key, str(path))
+        download_file(self.client, bucket or self.bucket, object_key, str(path))
         return path
 
-    def presigned_url(self, object_key: str, expires_seconds: Optional[int] = None) -> str:
+    def presigned_url(
+        self,
+        object_key: str,
+        expires_seconds: Optional[int] = None,
+        bucket: Optional[str] = None,
+    ) -> str:
         return presigned_get(
             self.client,
-            self.bucket,
+            bucket or self.bucket,
             object_key,
             expires_seconds or self.settings.presigned_url_expires_seconds,
         )
+
+    def delete(self, object_key: str) -> None:
+        self.client.remove_object(self.bucket, object_key)
 
     def _upload(
         self,

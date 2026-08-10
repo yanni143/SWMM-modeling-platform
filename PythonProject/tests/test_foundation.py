@@ -5,6 +5,8 @@ from pathlib import Path
 from database.base import Base
 import models  # noqa: F401
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
+from Tools.InpTools.InpInspector import inspect_section, summarize_sections
+from Tools.InpTools.InpValidator import InvalidInpFile, validate_inp_file
 
 
 class _Stat:
@@ -69,6 +71,38 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(stored.object_key, "models/model-1/versions/version-1/model.inp")
         self.assertEqual(stored.checksum, "test-etag")
         self.assertEqual(len(fake.uploads), 1)
+
+    def test_inp_validation_and_section_inspection(self) -> None:
+        content = """[TITLE]
+Example model
+
+[OPTIONS]
+FLOW_UNITS CFS
+
+[JUNCTIONS]
+;;Name Elevation MaxDepth InitDepth SurchargeDepth PondedArea
+J1 10.0 3.0 0 0 0
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "example.inp"
+            path.write_text(content, encoding="utf-8")
+            validation = validate_inp_file(path)
+
+        summaries = summarize_sections(validation.sections)
+        junction_summary = next(item for item in summaries if item["name"] == "JUNCTIONS")
+        self.assertEqual(junction_summary["record_count"], 1)
+        self.assertTrue(junction_summary["editable"])
+
+        junctions = inspect_section("JUNCTIONS", validation.sections["JUNCTIONS"])
+        self.assertEqual(junctions["records"][0]["target"], "J1")
+        self.assertEqual(junctions["records"][0]["values"]["elevation"], "10.0")
+
+    def test_inp_without_options_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.inp"
+            path.write_text("[TITLE]\nInvalid", encoding="utf-8")
+            with self.assertRaises(InvalidInpFile):
+                validate_inp_file(path)
 
 
 if __name__ == "__main__":

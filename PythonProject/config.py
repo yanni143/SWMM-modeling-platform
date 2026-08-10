@@ -19,13 +19,16 @@ class Settings(BaseSettings):
 
     app_name: str = "SWMM Modeling and Simulation API"
     app_env: str = "development"
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = (
+        "http://localhost:5173,http://223.2.33.21,http://223.2.33.21:5173"
+    )
 
     database_url: str = Field(
         validation_alias=AliasChoices("DATABASE_URL", "DB_URL_NEW", "PG_DSN")
     )
     database_name: str = "fenhuModel"
     runtime_dir: Path = PROJECT_DIR / ".runtime"
+    max_inp_upload_bytes: int = 20 * 1024 * 1024
 
     minio_endpoint: str = "127.0.0.1:9000"
     minio_access_key: str = "minioadmin"

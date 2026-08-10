@@ -20,8 +20,7 @@ import SidebarPanel from './SidebarPanel.vue'
 import FeaturePopupTool from '@/utils/showFeaturePopup'
 import { useProjectStore } from '@/stores/projectStore'
 
-mapboxgl.accessToken =
-  'pk.eyJ1IjoicmljZXBpcGkiLCJhIjoiY2x5cXhkcTdpMDBxeDJqb2k2bjA1YXIydCJ9.qNr4-hA_bM3BNfhr4wPAfQ'
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || ''
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 

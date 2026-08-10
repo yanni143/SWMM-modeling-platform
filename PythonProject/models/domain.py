@@ -34,7 +34,7 @@ class SwmmModel(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
-    dataset_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    dataset_id: Mapped[Optional[str]] = mapped_column(String(100), index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
 
     versions: Mapped[list["ModelVersion"]] = relationship(
