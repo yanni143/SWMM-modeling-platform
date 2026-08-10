@@ -104,22 +104,9 @@
 .process-rail li.active { color: var(--ink); }
 .process-rail li.active span { color: white; border-color: var(--water); background: var(--water); }
 
-.upload-form {
-  display: grid;
-  gap: 12px;
-  padding: 17px;
-  border: 1px solid var(--rule);
-  background: rgba(255, 255, 255, 0.58);
-}
-
-.upload-form label { display: grid; gap: 6px; }
-.upload-form label > span,
 .section-title { font-size: 12px; font-weight: 650; letter-spacing: 0.04em; }
-.upload-form small,
 .section-title em { color: #748287; font-size: 10px; font-style: normal; font-weight: 400; }
 
-.upload-form input,
-.upload-form textarea,
 .ledger-select {
   box-sizing: border-box;
   width: 100%;
@@ -132,22 +119,7 @@
   font: 13px/1.4 inherit;
 }
 
-.upload-form input:focus,
-.upload-form textarea:focus,
 .ledger-select:focus { border-color: var(--water); box-shadow: 0 0 0 2px rgba(35, 116, 140, 0.12); }
-
-.primary-action {
-  min-height: 40px;
-  color: white;
-  border: 0;
-  background: var(--ink);
-  font: 650 12px/1 inherit;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-}
-
-.primary-action:hover { background: var(--water); }
-.primary-action:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .run-action {
   width: 100%;
@@ -172,6 +144,8 @@
   font-size: 12px;
 }
 
+.study-area-summary { margin-top: 4px; }
+.study-area-summary > p { margin: 0 0 12px; color: #64767c; font-size: 11px; line-height: 1.55; }
 .ledger-section,
 .parameter-preview { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--ink); }
 .section-title { margin-bottom: 10px; }
@@ -216,5 +190,5 @@ th { color: var(--water); background: #e3edef; text-transform: uppercase; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .primary-action { transition: none; }
+  .run-action { transition: none; }
 }

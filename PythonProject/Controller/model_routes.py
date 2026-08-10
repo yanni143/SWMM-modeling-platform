@@ -1,25 +1,21 @@
-import tempfile
-from pathlib import Path
-from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from minio.error import S3Error
 from sqlalchemy.orm import Session
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
-from config import get_settings
 from database.session import get_db
 from schemas.model import (
     DownloadUrlResponse,
-    ModelImportResponse,
     ModelListItem,
     ModelRead,
     ModelVersionRead,
     SectionDetailResponse,
     SectionSummary,
-    VersionSectionsResponse,
     VersionLayersResponse,
+    VersionSectionsResponse,
 )
 from schemas.parameter import (
     AppliedParameterChange,
@@ -28,44 +24,13 @@ from schemas.parameter import (
     EditableGroup,
     ParameterCatalogResponse,
 )
-from Service.ModelService import (
-    ModelNameConflictError,
-    ModelNotFoundError,
-    ModelService,
-    SectionNotFoundError,
-)
-from Tools.InpTools.InpInspector import summarize_sections
+from Service.ModelService import ModelNotFoundError, ModelService, SectionNotFoundError
 from Tools.InpTools.InpValidator import InvalidInpFile
 
-
 router = APIRouter(prefix="/api", tags=["projects"])
-settings = get_settings()
-
-
-async def save_upload(upload: UploadFile, destination: Path) -> int:
-    filename = upload.filename or ""
-    if Path(filename).suffix.lower() != ".inp":
-        raise HTTPException(status_code=422, detail="仅支持上传 .inp 文件")
-
-    size = 0
-    with destination.open("wb") as output:
-        while chunk := await upload.read(1024 * 1024):
-            size += len(chunk)
-            if size > settings.max_inp_upload_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail=f"INP 文件不能超过 {settings.max_inp_upload_bytes} 字节",
-                )
-            output.write(chunk)
-
-    if size == 0:
-        raise HTTPException(status_code=422, detail="上传文件为空")
-    return size
 
 
 def translate_service_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, ModelNameConflictError):
-        return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, (ModelNotFoundError, SectionNotFoundError)):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, InvalidInpFile):
@@ -75,46 +40,6 @@ def translate_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ValueError):
         return HTTPException(status_code=422, detail=str(exc))
     return HTTPException(status_code=500, detail="工程服务执行失败")
-
-
-@router.post("/models", response_model=ModelImportResponse, status_code=201)
-async def import_model(
-    name: Annotated[str, Form(min_length=1, max_length=200)],
-    file: Annotated[UploadFile, File()],
-    description: Annotated[Optional[str], Form(max_length=2000)] = None,
-    created_by: Annotated[Optional[str], Form(max_length=100)] = None,
-    session: Session = Depends(get_db),
-) -> ModelImportResponse:
-    runtime_dir = settings.resolved_runtime_dir
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="inp-upload-", dir=runtime_dir) as directory:
-            inp_path = Path(directory) / "model.inp"
-            await save_upload(file, inp_path)
-            model, version, validation = ModelService().import_inp(
-                session=session,
-                name=name,
-                description=description,
-                inp_path=inp_path,
-                original_filename=file.filename or "model.inp",
-                created_by=created_by,
-            )
-        return ModelImportResponse(
-            model=ModelRead.model_validate(model),
-            version=ModelVersionRead.model_validate(version),
-            sections=[
-                SectionSummary.model_validate(item)
-                for item in summarize_sections(validation.sections)
-            ],
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise translate_service_error(exc) from exc
-    finally:
-        await file.close()
-
 
 @router.get("/models", response_model=list[ModelListItem])
 def list_models(session: Session = Depends(get_db)) -> list[dict]:
@@ -235,11 +160,41 @@ def get_version_download_url(
     version_id: UUID, session: Session = Depends(get_db)
 ) -> DownloadUrlResponse:
     try:
-        url = ModelService().get_download_url(session, version_id)
+        ModelService().get_version(session, version_id)
         return DownloadUrlResponse(
             version_id=version_id,
-            expires_seconds=settings.presigned_url_expires_seconds,
-            url=url,
+            expires_seconds=0,
+            url=f"/api/model-versions/{version_id}/download",
+        )
+    except Exception as exc:
+        raise translate_service_error(exc) from exc
+
+
+@router.get("/model-versions/{version_id}/download")
+def download_version(
+    version_id: UUID, session: Session = Depends(get_db)
+) -> StreamingResponse:
+    try:
+        service = ModelService()
+        version = service.get_version(session, version_id)
+        response = service.storage.client.get_object(
+            version.inp_bucket,
+            version.inp_object_key,
+        )
+
+        def stream_object():
+            try:
+                yield from response.stream(amt=1024 * 1024)
+            finally:
+                response.close()
+                response.release_conn()
+
+        return StreamingResponse(
+            stream_object(),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="model-v{version.version}.inp"'
+            },
         )
     except Exception as exc:
         raise translate_service_error(exc) from exc

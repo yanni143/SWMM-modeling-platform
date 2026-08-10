@@ -52,12 +52,6 @@ export interface SectionDetail {
   records: SectionRecord[]
 }
 
-export interface ImportModelResponse {
-  model: ModelInfo
-  version: ModelVersion
-  sections: SectionSummary[]
-}
-
 export interface ProjectGeoJsonLayer {
   id: string
   name: string
@@ -174,19 +168,4 @@ export function createAdjustedVersion(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ changes, summary }),
   })
-}
-
-
-export function uploadModel(input: {
-  name: string
-  description?: string
-  createdBy?: string
-  file: File
-}): Promise<ImportModelResponse> {
-  const body = new FormData()
-  body.append('name', input.name)
-  body.append('file', input.file)
-  if (input.description) body.append('description', input.description)
-  if (input.createdBy) body.append('created_by', input.createdBy)
-  return request('/api/models', { method: 'POST', body })
 }

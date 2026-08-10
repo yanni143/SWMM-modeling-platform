@@ -7,7 +7,6 @@ import {
   fetchEditableParameters,
   createAdjustedVersion,
   runProjectVersion,
-  uploadModel,
   type ModelSummary,
   type ModelVersion,
   type SectionDetail,
@@ -25,7 +24,6 @@ interface ModelState {
   selectedSectionName: string | null
   sectionDetail: SectionDetail | null
   loading: boolean
-  uploading: boolean
   running: boolean
   savingVersion: boolean
   parameterGroups: EditableGroup[]
@@ -42,7 +40,6 @@ export const useModelStore = defineStore('model-library', {
     selectedSectionName: null,
     sectionDetail: null,
     loading: false,
-    uploading: false,
     running: false,
     savingVersion: false,
     parameterGroups: [],
@@ -55,13 +52,16 @@ export const useModelStore = defineStore('model-library', {
       state.versions.find((version) => version.id === state.selectedVersionId) ?? null,
   },
   actions: {
-    async loadModels() {
+    async loadModels(selectFixedModel = true) {
       this.loading = true
       this.error = null
       try {
         this.models = await fetchModels()
+        const fixedModel = this.models[0]
+        if (!fixedModel) throw new Error('系统内置研究区尚未初始化')
+        if (selectFixedModel) await this.selectModel(fixedModel.id)
       } catch (error) {
-        this.error = error instanceof Error ? error.message : '工程列表加载失败'
+        this.error = error instanceof Error ? error.message : '内置研究区加载失败'
       } finally {
         this.loading = false
       }
@@ -111,24 +111,6 @@ export const useModelStore = defineStore('model-library', {
         this.loading = false
       }
     },
-    async importModel(input: { name: string; description?: string; file: File }) {
-      this.uploading = true
-      this.error = null
-      try {
-        const imported = await uploadModel(input)
-        await this.loadModels()
-        this.selectedModelId = imported.model.id
-        this.versions = [imported.version]
-        this.selectedVersionId = imported.version.id
-        this.sections = imported.sections
-        return true
-      } catch (error) {
-        this.error = error instanceof Error ? error.message : 'INP 导入失败'
-        return false
-      } finally {
-        this.uploading = false
-      }
-    },
     async runSelectedVersion() {
       if (!this.selectedVersionId) return null
       this.running = true
@@ -151,7 +133,7 @@ export const useModelStore = defineStore('model-library', {
         const result = await createAdjustedVersion(parentVersionId, changes, summary)
         this.versions = await fetchVersions(this.selectedModelId)
         await this.selectVersion(result.version.id)
-        await this.loadModels()
+        await this.loadModels(false)
         return { ...result, parentVersionId }
       } catch (error) {
         this.error = error instanceof Error ? error.message : '新版本生成失败'

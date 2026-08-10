@@ -28,14 +28,13 @@
 
 SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP、OUT、RPT、日志和可视化文件必须进入 MinIO。
 
-## 当前工程导入流程
+## 固定研究区
 
-系统不再依赖基础 SHP 数据生成 INP。用户在前端工程工作台上传 `.inp` 文件后，后端会：
+系统不向用户提供 INP 上传能力，所有操作都从后端内置的
+`PythonProject/resources/fixed-study-area.inp` 开始。应用启动时会校验该文件，并幂等地建立固定工程和基线 V1，然后把基线归档到 MinIO。浏览器只会读取这一固定工程，数据库中可能残留的其他工程不会被接口返回或运行。
 
-1. 校验文件扩展名、大小和必要 INP 分区。
-2. 在 PostgreSQL 中建立工程和 V1 版本记录。
-3. 将原始 INP 存入 MinIO 私有 bucket，本地只保留请求期间的临时文件。
-4. 提供版本列表、参数分区索引和分区记录预览，为后续普通表单调参建立输入边界。
+部署真实研究区时，应在发布前替换这个资源文件，并保持 `FIXED_MODEL_ID` 与
+`FIXED_VERSION_ID` 在同一套持久化环境中不变。若需要发布新的基础模型，应作为一次明确的数据升级处理，而不是让用户上传。
 
 选择工程版本后可调用 `POST /api/model-versions/{version_id}/runs`。后端从 MinIO 下载 INP，在临时目录运行 PySWMM，解析 OUT，并将输入、OUT、RPT 和结果 GeoJSON 全部写回 MinIO。临时目录会在请求结束后删除。
 
@@ -45,7 +44,8 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 
 前端通过地图或对象列表选择要素，后端再次执行白名单和范围校验。保存时不会覆盖原始 INP，而是生成带父版本关系的新版本，并把逐项旧值/新值写入 `model_parameter_changes`。新版本可以直接运行并加载结果图层。
 
-主要接口位于 `/api/models` 和 `/api/model-versions/{version_id}`。当前阶段参数预览只读，修改参数并生成新版本属于下一阶段。
+只读的固定工程入口位于 `/api/models`，版本操作位于
+`/api/model-versions/{version_id}`。`POST /api/models` 不存在；用户调参时会基于当前版本生成新的派生版本，原始 V1 不会被覆盖。
 
 ## 前端开发
 
@@ -57,3 +57,16 @@ npm run dev
 ```
 
 可通过 `VITE_API_BASE_URL` 配置后端地址，开发环境默认使用 `http://localhost:8000`。
+
+## 腾讯云生产部署
+
+仓库提供了一套适用于 Ubuntu 24.04 的 Docker Compose 部署配置：
+
+- `compose.prod.yaml`：PostgreSQL/PostGIS、MinIO、FastAPI 和 Caddy/Vue。
+- `.env.production.example`：生产环境变量模板。
+- `deploy/server-bootstrap.sh`：服务器初始化和 Docker 权限配置。
+- `deploy/generate-env.sh`：生成随机数据库与 MinIO 密码。
+- `deploy/deploy.sh`：构建、发布、更新、查看日志和状态。
+- `deploy/backup.sh`：备份 PostgreSQL 和 MinIO。
+
+完整步骤见 [`deploy/README.md`](deploy/README.md)。

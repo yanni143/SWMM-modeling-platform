@@ -2,59 +2,30 @@
   <aside class="model-workspace" aria-label="工程工作台">
     <div class="workspace-heading">
       <div>
-        <p class="workspace-kicker">PROJECT INTAKE / 01</p>
-        <h2>工程工作台</h2>
+        <p class="workspace-kicker">FIXED STUDY AREA / 01</p>
+        <h2>{{ store.selectedModel?.name || '模型工作台' }}</h2>
       </div>
       <span class="system-state"><i></i> INP READY</span>
     </div>
 
     <ol class="process-rail" aria-label="工程准备流程">
-      <li class="active"><span>01</span>导入文件</li>
-      <li :class="{ active: store.selectedVersionId }"><span>02</span>初始版本</li>
-      <li :class="{ active: store.parameterGroups.length }"><span>03</span>安全调参</li>
+      <li class="active"><span>01</span>内置基线</li>
+      <li :class="{ active: store.selectedVersionId }"><span>02</span>版本管理</li>
+      <li :class="{ active: store.parameterGroups.length }"><span>03</span>运行调参</li>
     </ol>
-
-    <form class="upload-form" @submit.prevent="submitImport">
-      <label>
-        <span>工程名称</span>
-        <input v-model.trim="modelName" required maxlength="200" placeholder="例如：汾湖现状排水工程" />
-      </label>
-      <label>
-        <span>INP 文件</span>
-        <input ref="fileInput" type="file" required accept=".inp" @change="pickFile" />
-      </label>
-      <label>
-        <span>备注 <small>可选</small></span>
-        <textarea v-model.trim="description" maxlength="2000" rows="2" placeholder="工程来源、适用场景等"></textarea>
-      </label>
-      <button class="primary-action" type="submit" :disabled="store.uploading || !selectedFile">
-        {{ store.uploading ? '正在校验并归档…' : '导入并建立 V1' }}
-      </button>
-    </form>
 
     <p v-if="store.error" class="error-message" role="alert">{{ store.error }}</p>
 
-    <section class="ledger-section">
+    <section v-if="store.selectedModel" class="study-area-summary">
       <div class="section-title">
-        <span>工程管理</span>
-        <button type="button" @click="store.loadModels">刷新</button>
+        <span>固定研究区</span>
+        <button type="button" @click="store.loadModels()">刷新</button>
       </div>
-      <select
-        class="ledger-select"
-        :value="store.selectedModelId || ''"
-        aria-label="选择工程"
-        @change="changeModel"
-      >
-        <option value="">{{ store.loading ? '正在读取…' : '选择一个工程' }}</option>
-        <option v-for="model in store.models" :key="model.id" :value="model.id">
-          {{ model.name }} · {{ model.version_count }} 个版本
-        </option>
-      </select>
-
-      <div v-if="store.selectedModel" class="model-facts">
-        <div><span>状态</span><strong>{{ store.selectedModel.status }}</strong></div>
+      <p>{{ store.selectedModel.description || '系统内置 SWMM 模型' }}</p>
+      <div class="model-facts">
+        <div><span>状态</span><strong>已就绪</strong></div>
+        <div><span>版本数</span><strong>{{ store.selectedModel.version_count }}</strong></div>
         <div><span>最新版本</span><strong>V{{ store.selectedModel.latest_version ?? '—' }}</strong></div>
-        <div><span>更新时间</span><strong>{{ formatDate(store.selectedModel.updated_at) }}</strong></div>
       </div>
     </section>
 
@@ -85,46 +56,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 import { useModelStore } from '@/stores/modelStore'
 import eventBus from '@/eventBus'
 import ParameterTuning from './ParameterTuning.vue'
 
 const store = useModelStore()
-const modelName = ref('')
-const description = ref('')
-const selectedFile = ref<File | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
 
 onMounted(() => store.loadModels())
-
-function pickFile(event: Event) {
-  const input = event.target as HTMLInputElement
-  selectedFile.value = input.files?.[0] ?? null
-  if (!modelName.value && selectedFile.value) {
-    modelName.value = selectedFile.value.name.replace(/\.inp$/i, '')
-  }
-}
-
-async function submitImport() {
-  if (!selectedFile.value || !modelName.value) return
-  const success = await store.importModel({
-    name: modelName.value,
-    description: description.value || undefined,
-    file: selectedFile.value,
-  })
-  if (success) {
-    modelName.value = ''
-    description.value = ''
-    selectedFile.value = null
-    if (fileInput.value) fileInput.value.value = ''
-  }
-}
-
-function changeModel(event: Event) {
-  const modelId = (event.target as HTMLSelectElement).value
-  if (modelId) store.selectModel(modelId)
-}
 
 function changeVersion(event: Event) {
   const versionId = (event.target as HTMLSelectElement).value
@@ -134,10 +73,6 @@ function changeVersion(event: Event) {
 async function runCurrentVersion() {
   const result = await store.runSelectedVersion()
   if (result) eventBus.emit('modelRunCompleted', result)
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date(value))
 }
 
 function formatBytes(value: number | null) {

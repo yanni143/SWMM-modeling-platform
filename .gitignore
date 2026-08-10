@@ -2,12 +2,16 @@
 **/.env
 **/.env.*
 !**/.env.example
+!**/*.env.example
+!.env.production.example
 
 # Python
 **/.venv/
+/.uv-cache/
 **/__pycache__/
 **/*.py[cod]
 **/.pytest_cache/
+**/pytest-cache-files-*/
 **/.mypy_cache/
 **/.ruff_cache/
 **/*.egg-info/
@@ -29,4 +33,4 @@
 **/logs/
 **/*.log
 **/.runtime/
-
+**/backups/

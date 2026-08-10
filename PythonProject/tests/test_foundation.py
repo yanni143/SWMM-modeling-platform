@@ -2,11 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from database.base import Base
 import models  # noqa: F401
+from config import get_settings
+from database.base import Base
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
-from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpGeoJson import build_geojson_layers
+from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpParameterEditor import (
     ParameterValidationError,
     apply_parameter_changes,
@@ -45,6 +46,14 @@ class FakeMinio:
 
 
 class FoundationTests(unittest.TestCase):
+    def test_builtin_inp_is_valid_and_upload_route_is_absent(self) -> None:
+        validation = validate_inp_file(get_settings().resolved_fixed_inp_path)
+        self.assertIn("OPTIONS", validation.sections)
+        routes_source = (
+            Path(__file__).parents[1] / "Controller" / "model_routes.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn('@router.post("/models"', routes_source)
+
     def test_domain_metadata_contains_core_tables(self) -> None:
         expected = {
             "swmm_models",

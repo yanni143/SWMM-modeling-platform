@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from config import get_settings
-from models.domain import ModelVersion, RunArtifact, SimulationRun
+from models.domain import RunArtifact, SimulationRun
+from Service.ModelService import ModelNotFoundError, ModelService
 from Service.SWMMService import SwmmService
 from storage.artifact_storage import ArtifactStorageService, StoredObject
 from swmm_core.result_geojson import (
@@ -29,9 +30,10 @@ class SimulationService:
     def run_version(
         self, session: Session, version_id: uuid.UUID
     ) -> tuple[SimulationRun, list[dict]]:
-        version = session.get(ModelVersion, version_id)
-        if not version:
-            raise SimulationRunError("工程版本不存在")
+        try:
+            version = ModelService(storage=self.storage).get_version(session, version_id)
+        except ModelNotFoundError as exc:
+            raise SimulationRunError("工程版本不存在") from exc
 
         run = SimulationRun(
             id=uuid.uuid4(),
@@ -99,7 +101,7 @@ class SimulationService:
 
     def list_layer_artifacts(self, session: Session, run_id: uuid.UUID) -> list[dict]:
         run = session.get(SimulationRun, run_id)
-        if not run:
+        if not run or run.model_id != self.settings.fixed_model_id:
             raise SimulationRunError("运行记录不存在")
         artifacts = list(
             session.scalars(

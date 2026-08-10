@@ -42,12 +42,6 @@ class SectionSummary(BaseModel):
     fields: list[str]
 
 
-class ModelImportResponse(BaseModel):
-    model: ModelRead
-    version: ModelVersionRead
-    sections: list[SectionSummary]
-
-
 class VersionSectionsResponse(BaseModel):
     version_id: UUID
     sections: list[SectionSummary]

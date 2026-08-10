@@ -24,7 +24,7 @@
       <div v-if="layers.length === 0" class="no-layers">
         <span aria-hidden="true">⌁</span>
         <strong>地图中还没有工程图层</strong>
-        <p>上传并选择包含空间坐标的 INP，或完成一次模型运行。</p>
+        <p>正在加载内置研究区图层，或尚未完成一次模型运行。</p>
       </div>
     </div>
   </section>
