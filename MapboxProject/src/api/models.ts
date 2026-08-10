@@ -58,6 +58,26 @@ export interface ImportModelResponse {
   sections: SectionSummary[]
 }
 
+export interface ProjectGeoJsonLayer {
+  id: string
+  name: string
+  geometry_type: 'fill' | 'line' | 'circle'
+  source: 'inp' | 'simulation'
+  source_crs?: string
+  display_crs?: string
+  geojson: {
+    type: 'FeatureCollection'
+    features: Array<Record<string, unknown>>
+  }
+}
+
+export interface ProjectRunResponse {
+  run_id: string
+  status: string
+  layers: ProjectGeoJsonLayer[]
+  artifacts: Array<Record<string, unknown>>
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, options)
   if (!response.ok) {
@@ -87,6 +107,17 @@ export async function fetchSection(versionId: string, sectionName: string): Prom
     `/api/model-versions/${versionId}/sections/${encodeURIComponent(sectionName)}`,
   )
   return response.section
+}
+
+export async function fetchProjectLayers(versionId: string): Promise<ProjectGeoJsonLayer[]> {
+  const response = await request<{ layers: ProjectGeoJsonLayer[] }>(
+    `/api/model-versions/${versionId}/layers`,
+  )
+  return response.layers
+}
+
+export function runProjectVersion(versionId: string): Promise<ProjectRunResponse> {
+  return request(`/api/model-versions/${versionId}/runs`, { method: 'POST' })
 }
 
 export function uploadModel(input: {

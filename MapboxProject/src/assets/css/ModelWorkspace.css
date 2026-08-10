@@ -149,6 +149,20 @@
 .primary-action:hover { background: var(--water); }
 .primary-action:disabled { cursor: not-allowed; opacity: 0.45; }
 
+.run-action {
+  width: 100%;
+  min-height: 38px;
+  margin-bottom: 10px;
+  color: var(--ink);
+  border: 1px solid var(--water);
+  background: rgba(104, 196, 206, 0.13);
+  font: 650 11px/1 inherit;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+.run-action:hover { color: white; background: var(--water); }
+.run-action:disabled { cursor: wait; opacity: 0.5; }
+
 .error-message {
   margin: 10px 0 0;
   padding: 9px 11px;

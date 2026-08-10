@@ -17,6 +17,7 @@ dependencies = [
   "minio>=7.2,<8",
   "psycopg2-binary>=2.9,<3",
   "pydantic-settings>=2.7,<3",
+  "pyproj>=3.6,<4",
   "pyswmm>=2.0,<3",
   "python-dotenv>=1.0,<2",
   "python-multipart>=0.0.20,<1",

@@ -1,14 +1,14 @@
 <template>
-  <aside class="model-workspace" aria-label="模型工作台">
+  <aside class="model-workspace" aria-label="工程工作台">
     <div class="workspace-heading">
       <div>
-        <p class="workspace-kicker">MODEL INTAKE / 01</p>
-        <h2>模型工作台</h2>
+        <p class="workspace-kicker">PROJECT INTAKE / 01</p>
+        <h2>工程工作台</h2>
       </div>
       <span class="system-state"><i></i> INP READY</span>
     </div>
 
-    <ol class="process-rail" aria-label="模型准备流程">
+    <ol class="process-rail" aria-label="工程准备流程">
       <li class="active"><span>01</span>导入文件</li>
       <li :class="{ active: store.selectedVersionId }"><span>02</span>初始版本</li>
       <li :class="{ active: store.sections.length }"><span>03</span>参数索引</li>
@@ -16,8 +16,8 @@
 
     <form class="upload-form" @submit.prevent="submitImport">
       <label>
-        <span>模型名称</span>
-        <input v-model.trim="modelName" required maxlength="200" placeholder="例如：汾湖现状排水模型" />
+        <span>工程名称</span>
+        <input v-model.trim="modelName" required maxlength="200" placeholder="例如：汾湖现状排水工程" />
       </label>
       <label>
         <span>INP 文件</span>
@@ -25,7 +25,7 @@
       </label>
       <label>
         <span>备注 <small>可选</small></span>
-        <textarea v-model.trim="description" maxlength="2000" rows="2" placeholder="模型来源、适用场景等"></textarea>
+        <textarea v-model.trim="description" maxlength="2000" rows="2" placeholder="工程来源、适用场景等"></textarea>
       </label>
       <button class="primary-action" type="submit" :disabled="store.uploading || !selectedFile">
         {{ store.uploading ? '正在校验并归档…' : '导入并建立 V1' }}
@@ -36,16 +36,16 @@
 
     <section class="ledger-section">
       <div class="section-title">
-        <span>模型库</span>
+        <span>工程管理</span>
         <button type="button" @click="store.loadModels">刷新</button>
       </div>
       <select
         class="ledger-select"
         :value="store.selectedModelId || ''"
-        aria-label="选择模型"
+        aria-label="选择工程"
         @change="changeModel"
       >
-        <option value="">{{ store.loading ? '正在读取…' : '选择一个模型' }}</option>
+        <option value="">{{ store.loading ? '正在读取…' : '选择一个工程' }}</option>
         <option v-for="model in store.models" :key="model.id" :value="model.id">
           {{ model.name }} · {{ model.version_count }} 个版本
         </option>
@@ -63,13 +63,21 @@
       <select
         class="ledger-select"
         :value="store.selectedVersionId || ''"
-        aria-label="选择模型版本"
+        aria-label="选择工程版本"
         @change="changeVersion"
       >
         <option v-for="version in store.versions" :key="version.id" :value="version.id">
           V{{ version.version }} · {{ formatBytes(version.size_bytes) }}
         </option>
       </select>
+      <button
+        class="run-action"
+        type="button"
+        :disabled="store.running || !store.selectedVersionId"
+        @click="runCurrentVersion"
+      >
+        {{ store.running ? '正在运行并解析结果…' : '运行当前版本' }}
+      </button>
 
       <div class="section-index">
         <button
@@ -115,6 +123,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useModelStore } from '@/stores/modelStore'
+import eventBus from '@/eventBus'
 
 const store = useModelStore()
 const modelName = ref('')
@@ -155,6 +164,11 @@ function changeModel(event: Event) {
 function changeVersion(event: Event) {
   const versionId = (event.target as HTMLSelectElement).value
   if (versionId) store.selectVersion(versionId)
+}
+
+async function runCurrentVersion() {
+  const result = await store.runSelectedVersion()
+  if (result) eventBus.emit('modelRunCompleted', result)
 }
 
 function formatDate(value: string) {

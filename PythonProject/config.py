@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     database_name: str = "fenhuModel"
     runtime_dir: Path = PROJECT_DIR / ".runtime"
     max_inp_upload_bytes: int = 20 * 1024 * 1024
+    swmm_input_crs: str = "EPSG:4549"
 
     minio_endpoint: str = "127.0.0.1:9000"
     minio_access_key: str = "minioadmin"

@@ -14,13 +14,16 @@ def run_pyswmm(inp_path: str) -> dict:
     print(f"运行文件: {inp_file.name}")
 
     # 切到 inp 所在目录，避免相对路径问题
-    os.chdir(workdir)
-
-    with Simulation(str(inp_file)) as sim:
-        print("开始运行 PySWMM...")
-        for _ in sim:
-            pass
-        print("PySWMM 运行完成。")
+    previous_workdir = Path.cwd()
+    try:
+        os.chdir(workdir)
+        with Simulation(str(inp_file)) as sim:
+            print("开始运行 PySWMM...")
+            for _ in sim:
+                pass
+            print("PySWMM 运行完成。")
+    finally:
+        os.chdir(previous_workdir)
 
     rpt_file = inp_file.with_suffix(".rpt")
     out_file = inp_file.with_suffix(".out")

@@ -1,22 +1,18 @@
 export default class FeaturePopupTool {
-  constructor(mapInstance, popup, simulationResultFiles, projectStore = null) {
+  constructor(mapInstance, popup, projectStore = null) {
     this.mapInstance = mapInstance
     this.popup = popup
-    this.simulationResultFiles = simulationResultFiles
     this.projectStore = projectStore
   }
 
   /**
    * 显示要素弹窗
    */
-  showFeaturePopup(feature, lngLat, layerName) {
-    const properties = feature.properties
-
-    // 检查当前是否为模拟结果图层
-    const isSimulationResult = this.simulationResultFiles.some((file) => file.name === layerName)
-    if (isSimulationResult) {
+  showFeaturePopup(feature, lngLat, layer) {
+    const layerName = layer.name
+    if (layer.source === 'simulation') {
       // 对模拟结果图层，收集同一位置的时序数据
-      const timeSeriesData = this.collectTimeSeriesData(feature, layerName)
+      const timeSeriesData = this.collectTimeSeriesData(feature, layer.id)
       if (timeSeriesData && timeSeriesData.length > 1) {
         this.showTimeSeriesPopup(feature, lngLat, layerName, timeSeriesData)
         return
@@ -78,10 +74,10 @@ export default class FeaturePopupTool {
   /**
    * 收集时序数据
    */
-  collectTimeSeriesData(clickedFeature, layerName) {
+  collectTimeSeriesData(clickedFeature, layerId) {
     if (!this.mapInstance) return null
 
-    const sourceId = `${layerName}-source`
+    const sourceId = `${layerId}-source`
     const source = this.mapInstance.getSource(sourceId)
     if (!source || !source._data) return null
 
@@ -198,8 +194,25 @@ export default class FeaturePopupTool {
         { value: 'ponded_v', label: 'Ponded volume' },
         { value: 'pollut', label: 'Pollutant' },
       ],
+      '节点模拟结果': [
+        { value: 'depth', label: 'Depth' },
+        { value: 'head', label: 'Head' },
+        { value: 'lateral_i', label: 'Lateral inflow' },
+        { value: 'total_i', label: 'Total inflow' },
+        { value: 'flooding', label: 'Flooding' },
+        { value: 'ponded_v', label: 'Ponded volume' },
+        { value: 'pollut', label: 'Pollutant' },
+      ],
       // 管段模拟结果
       '管段模拟结果': [
+        { value: 'rate', label: 'Flow rate' },
+        { value: 'depth', label: 'Depth' },
+        { value: 'velocity', label: 'Velocity' },
+        { value: 'volume', label: 'Volume' },
+        { value: 'capacity', label: 'Capacity' },
+        { value: 'pollut', label: 'Pollutant' },
+      ],
+      '管线模拟结果': [
         { value: 'rate', label: 'Flow rate' },
         { value: 'depth', label: 'Depth' },
         { value: 'velocity', label: 'Velocity' },
@@ -315,7 +328,9 @@ export default class FeaturePopupTool {
     // 根据图层名称确定文件名
     const filenameMap = {
       '管点模拟结果': 'out_nodes.json',
+      '节点模拟结果': 'out_nodes.json',
       '管段模拟结果': 'out_links.json',
+      '管线模拟结果': 'out_links.json',
       '子汇水区模拟结果': 'out_subcatchments.json',
     }
 
@@ -576,7 +591,9 @@ export default class FeaturePopupTool {
       '河流': 'River',
       '子汇水区模拟结果': 'Subcatchment Results',
       '管段模拟结果': 'Conduit Results',
-      '管点模拟结果': 'Junction Results'
+      '管点模拟结果': 'Junction Results',
+      '节点模拟结果': 'Node Results',
+      '管线模拟结果': 'Conduit Results',
     }
     return nameMap[layerName] || layerName
   }

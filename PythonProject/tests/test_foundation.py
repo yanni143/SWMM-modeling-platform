@@ -6,6 +6,7 @@ from database.base import Base
 import models  # noqa: F401
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
+from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpValidator import InvalidInpFile, validate_inp_file
 
 
@@ -103,6 +104,40 @@ J1 10.0 3.0 0 0 0
             path.write_text("[TITLE]\nInvalid", encoding="utf-8")
             with self.assertRaises(InvalidInpFile):
                 validate_inp_file(path)
+
+    def test_inp_spatial_sections_build_geojson_layers(self) -> None:
+        sections = {
+            "JUNCTIONS": ["J1 0 2", "J2 0 2"],
+            "CONDUITS": ["C1 J1 J2 100 0.013 0 0"],
+            "SUBCATCHMENTS": ["S1 RG1 J1 1 30 50 1 0"],
+            "COORDINATES": ["J1 120.1 31.1", "J2 120.2 31.2"],
+            "VERTICES": ["C1 120.15 31.16"],
+            "POLYGONS": ["S1 120.1 31.1", "S1 120.2 31.1", "S1 120.2 31.2"],
+        }
+
+        layers = build_geojson_layers(sections)
+
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            ["inp-subcatchments", "inp-conduits", "inp-nodes"],
+        )
+        self.assertEqual(
+            layers[1]["geojson"]["features"][0]["geometry"]["type"], "LineString"
+        )
+        self.assertEqual(len(layers[2]["geojson"]["features"]), 2)
+
+    def test_projected_inp_coordinates_are_converted_for_mapbox(self) -> None:
+        sections = {
+            "JUNCTIONS": ["J1 0 2"],
+            "COORDINATES": ["J1 581043.41 3435679.38"],
+        }
+
+        layers = build_geojson_layers(sections, source_crs="EPSG:4549")
+        point = layers[0]["geojson"]["features"][0]["geometry"]["coordinates"]
+
+        self.assertAlmostEqual(point[0], 120.848921, places=5)
+        self.assertAlmostEqual(point[1], 31.039645, places=5)
+        self.assertEqual(layers[0]["display_crs"], "EPSG:4326")
 
 
 if __name__ == "__main__":

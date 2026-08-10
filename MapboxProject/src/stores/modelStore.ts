@@ -1,9 +1,10 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import {
   fetchModels,
   fetchSection,
   fetchSections,
   fetchVersions,
+  runProjectVersion,
   uploadModel,
   type ModelSummary,
   type ModelVersion,
@@ -21,6 +22,7 @@ interface ModelState {
   sectionDetail: SectionDetail | null
   loading: boolean
   uploading: boolean
+  running: boolean
   error: string | null
 }
 
@@ -35,6 +37,7 @@ export const useModelStore = defineStore('model-library', {
     sectionDetail: null,
     loading: false,
     uploading: false,
+    running: false,
     error: null,
   }),
   getters: {
@@ -50,7 +53,7 @@ export const useModelStore = defineStore('model-library', {
       try {
         this.models = await fetchModels()
       } catch (error) {
-        this.error = error instanceof Error ? error.message : '模型列表加载失败'
+        this.error = error instanceof Error ? error.message : '工程列表加载失败'
       } finally {
         this.loading = false
       }
@@ -67,7 +70,7 @@ export const useModelStore = defineStore('model-library', {
         const latest = this.versions[0]
         if (latest) await this.selectVersion(latest.id)
       } catch (error) {
-        this.error = error instanceof Error ? error.message : '模型版本加载失败'
+        this.error = error instanceof Error ? error.message : '工程版本加载失败'
       } finally {
         this.loading = false
       }
@@ -117,5 +120,22 @@ export const useModelStore = defineStore('model-library', {
         this.uploading = false
       }
     },
+    async runSelectedVersion() {
+      if (!this.selectedVersionId) return null
+      this.running = true
+      this.error = null
+      try {
+        return await runProjectVersion(this.selectedVersionId)
+      } catch (error) {
+        this.error = error instanceof Error ? error.message : '工程运行失败'
+        return null
+      } finally {
+        this.running = false
+      }
+    },
   },
 })
+
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useModelStore, import.meta.hot))
+}

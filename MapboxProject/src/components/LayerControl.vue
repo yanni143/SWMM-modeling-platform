@@ -1,46 +1,33 @@
 <template>
-  <div class="layer-control" :class="{ collapsed: isCollapsed }">
-    <div class="layer-top" @click="toggleCollapse">
-      <label>Layer Manage</label>
-      <span class="collapse-icon">{{ isCollapsed ? '+' : '-' }}</span>
-    </div>
+  <section class="layer-control" :class="{ collapsed: isCollapsed }" aria-label="工程图层">
+    <button class="layer-top" type="button" :aria-expanded="!isCollapsed" @click="toggleCollapse">
+      <span>
+        <small>MAP CONTENT</small>
+        工程图层
+      </span>
+      <b>{{ layers.length }}</b>
+      <i aria-hidden="true">{{ isCollapsed ? '+' : '−' }}</i>
+    </button>
 
-    <div class="collapse-content" :class="{ collapsed: isCollapsed }">
-      <div class="tab-buttons">
-        <button :class="{ active: currentTab === 'original' }" @click="currentTab = 'original'">
-          Original data
-        </button>
-        <button :class="{ active: currentTab === 'simulation' }" @click="currentTab = 'simulation'">
-          Simulation result
-        </button>
-      </div>
+    <div v-show="!isCollapsed" class="layer-list">
+      <label v-for="layer in layers" :key="layer.id" class="layer-item">
+        <input
+          type="checkbox"
+          :checked="layerVisibility[layer.id]"
+          @change="handleLayerChange(layer.id, $event)"
+        />
+        <span class="layer-swatch" :data-geometry="layer.type"></span>
+        <span class="layer-name">{{ layer.displayName || layer.name }}</span>
+        <small>{{ layer.source === 'inp' ? 'INP' : 'RUN' }}</small>
+      </label>
 
-      <div v-if="currentTab === 'original'" class="layer-list">
-        <div v-for="file in originalDataFiles" :key="file.name" class="layer-item">
-          <input
-            type="checkbox"
-            :id="file.name"
-            v-model="layerVisibility[file.name]"
-            @change="handleLayerChange(file.name)"
-          />
-          <label :for="file.name">{{ file.displayName || file.name }}</label>
-        </div>
-        <div v-if="originalDataFiles.length === 0" class="no-layers">No layers data</div>
-      </div>
-
-      <div v-if="currentTab === 'simulation'" class="layer-list">
-        <div v-for="file in simulationResultFiles" :key="file.name" class="layer-item">
-          <input
-            type="checkbox"
-            :id="file.name"
-            v-model="layerVisibility[file.name]"
-            @change="handleLayerChange(file.name)"
-          />
-          <label :for="file.name">{{ file.displayName || file.name }}</label>
-        </div>
+      <div v-if="layers.length === 0" class="no-layers">
+        <span aria-hidden="true">⌁</span>
+        <strong>地图中还没有工程图层</strong>
+        <p>上传并选择包含空间坐标的 INP，或完成一次模型运行。</p>
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <script>
@@ -49,33 +36,16 @@ import '@/assets/css/LayerControl.css'
 export default {
   name: 'LayerControl',
   props: {
-    originalDataFiles: {
-      type: Array,
-      required: true,
-    },
-    simulationResultFiles: {
-      type: Array,
-      required: true,
-    },
-    layerVisibility: {
-      type: Object,
-      required: true,
-    }
+    layers: { type: Array, required: true },
+    layerVisibility: { type: Object, required: true },
   },
-  data() {
-    return {
-      currentTab: 'original',
-      isCollapsed: false,
-    }
-  },
+  data: () => ({ isCollapsed: false }),
   methods: {
-    handleLayerChange(layerName) {
-      this.$emit('layer-visibility-change', layerName, this.layerVisibility[layerName])
+    handleLayerChange(layerId, event) {
+      this.$emit('layer-visibility-change', layerId, event.target.checked)
     },
-
     toggleCollapse() {
       this.isCollapsed = !this.isCollapsed
-      this.$emit('collapse-state-change', this.isCollapsed)
     },
   },
 }

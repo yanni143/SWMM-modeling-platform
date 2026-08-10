@@ -58,6 +58,21 @@ class SectionDetailResponse(BaseModel):
     section: dict[str, Any]
 
 
+class GeoJsonLayer(BaseModel):
+    id: str
+    name: str
+    geometry_type: str
+    source: str
+    source_crs: Optional[str] = None
+    display_crs: str = "EPSG:4326"
+    geojson: dict[str, Any]
+
+
+class VersionLayersResponse(BaseModel):
+    version_id: UUID
+    layers: list[GeoJsonLayer]
+
+
 class DownloadUrlResponse(BaseModel):
     version_id: UUID
     expires_seconds: int

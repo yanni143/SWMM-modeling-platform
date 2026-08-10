@@ -11,6 +11,7 @@ from config import get_settings
 from models.domain import ModelVersion, SwmmModel
 from storage.artifact_storage import ArtifactStorageService
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
+from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpValidator import InpValidationResult, validate_inp_file
 
 
@@ -42,11 +43,11 @@ class ModelService:
     ) -> tuple[SwmmModel, ModelVersion, InpValidationResult]:
         clean_name = name.strip()
         if not clean_name:
-            raise ValueError("模型名称不能为空")
+            raise ValueError("工程名称不能为空")
 
         existing = session.scalar(select(SwmmModel.id).where(SwmmModel.name == clean_name))
         if existing:
-            raise ModelNameConflictError(f"模型名称已存在：{clean_name}")
+            raise ModelNameConflictError(f"工程名称已存在：{clean_name}")
 
         validation = validate_inp_file(inp_path)
         model_id = uuid.uuid4()
@@ -84,7 +85,7 @@ class ModelService:
         except IntegrityError as exc:
             session.rollback()
             self._delete_uploaded_object(stored.object_key)
-            raise ModelNameConflictError(f"模型名称已存在：{clean_name}") from exc
+            raise ModelNameConflictError(f"工程名称已存在：{clean_name}") from exc
         except Exception:
             session.rollback()
             self._delete_uploaded_object(stored.object_key)
@@ -118,7 +119,7 @@ class ModelService:
     def get_model(self, session: Session, model_id: uuid.UUID) -> SwmmModel:
         model = session.get(SwmmModel, model_id)
         if not model:
-            raise ModelNotFoundError("模型不存在")
+            raise ModelNotFoundError("工程不存在")
         return model
 
     def list_versions(self, session: Session, model_id: uuid.UUID) -> list[ModelVersion]:
@@ -134,7 +135,7 @@ class ModelService:
     def get_version(self, session: Session, version_id: uuid.UUID) -> ModelVersion:
         version = session.get(ModelVersion, version_id)
         if not version:
-            raise ModelNotFoundError("模型版本不存在")
+            raise ModelNotFoundError("工程版本不存在")
         return version
 
     def list_sections(self, session: Session, version_id: uuid.UUID) -> list[dict]:
@@ -147,6 +148,13 @@ class ModelService:
         if section_name not in validation.sections:
             raise SectionNotFoundError(f"INP 中不存在 [{section_name}] 节")
         return inspect_section(section_name, validation.sections[section_name])
+
+    def get_geometry_layers(self, session: Session, version_id: uuid.UUID) -> list[dict]:
+        _, validation = self._download_and_validate(session, version_id)
+        return build_geojson_layers(
+            validation.sections,
+            source_crs=self.settings.swmm_input_crs,
+        )
 
     def get_download_url(self, session: Session, version_id: uuid.UUID) -> str:
         version = self.get_version(session, version_id)

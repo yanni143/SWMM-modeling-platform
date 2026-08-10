@@ -19,6 +19,7 @@ from schemas.model import (
     SectionDetailResponse,
     SectionSummary,
     VersionSectionsResponse,
+    VersionLayersResponse,
 )
 from Service.ModelService import (
     ModelNameConflictError,
@@ -30,7 +31,7 @@ from Tools.InpTools.InpInspector import summarize_sections
 from Tools.InpTools.InpValidator import InvalidInpFile
 
 
-router = APIRouter(prefix="/api", tags=["models"])
+router = APIRouter(prefix="/api", tags=["projects"])
 settings = get_settings()
 
 
@@ -66,7 +67,7 @@ def translate_service_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=503, detail="MinIO 对象存储当前不可用")
     if isinstance(exc, ValueError):
         return HTTPException(status_code=422, detail=str(exc))
-    return HTTPException(status_code=500, detail="模型服务执行失败")
+    return HTTPException(status_code=500, detail="工程服务执行失败")
 
 
 @router.post("/models", response_model=ModelImportResponse, status_code=201)
@@ -158,6 +159,20 @@ def get_version_section(
     try:
         section = ModelService().get_section(session, version_id, section_name)
         return SectionDetailResponse(version_id=version_id, section=section)
+    except Exception as exc:
+        raise translate_service_error(exc) from exc
+
+
+@router.get(
+    "/model-versions/{version_id}/layers",
+    response_model=VersionLayersResponse,
+)
+def get_version_layers(
+    version_id: UUID, session: Session = Depends(get_db)
+) -> VersionLayersResponse:
+    try:
+        layers = ModelService().get_geometry_layers(session, version_id)
+        return VersionLayersResponse(version_id=version_id, layers=layers)
     except Exception as exc:
         raise translate_service_error(exc) from exc
 
