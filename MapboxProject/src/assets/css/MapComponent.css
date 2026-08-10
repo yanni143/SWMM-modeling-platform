@@ -1,0 +1,52 @@
+.sidebar-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.map-container {
+  position: fixed;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  z-index: 1;
+}
+
+.mapboxgl-popup-content {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 16px;
+}
+
+.mapboxgl-popup-close-button {
+  font-size: 18px;
+  color: #666;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  line-height: 24px;
+  text-align: center;
+  right: 8px;
+  top: 8px;
+}
+
+.mapboxgl-popup-close-button:hover {
+  background: rgba(255, 255, 255, 1);
+  color: #333;
+}
+
+/* 时序数据弹窗样式 */
+.time-series-popup {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.time-series-popup select {
+  cursor: pointer;
+}
+
+.time-series-popup select:focus {
+  outline: none;
+  border-color: #007cbf;
+}

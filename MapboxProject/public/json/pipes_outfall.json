@@ -1,0 +1,26 @@
+{
+"type": "FeatureCollection",
+"name": "pipes_outfall",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "Name": "CYCSK23", "Type": "TIDAL", "InvertEL": -1.766, "FixedStage": 0, "CurveNum": "TCYCSK23" }, "geometry": { "type": "Point", "coordinates": [ 120.848944324797571, 31.040731872689758 ] } },
+{ "type": "Feature", "properties": { "Name": "CYCSK22", "Type": "TIDAL", "InvertEL": -1.656, "FixedStage": 0, "CurveNum": "TCYCSK22" }, "geometry": { "type": "Point", "coordinates": [ 120.85105483426716, 31.038089886266953 ] } },
+{ "type": "Feature", "properties": { "Name": "DY535", "Type": "TIDAL", "InvertEL": -2.288, "FixedStage": 0, "CurveNum": "TDY535" }, "geometry": { "type": "Point", "coordinates": [ 120.843351738881992, 31.040892494004854 ] } },
+{ "type": "Feature", "properties": { "Name": "DY445", "Type": "TIDAL", "InvertEL": -2.974, "FixedStage": 0, "CurveNum": "TDY445" }, "geometry": { "type": "Point", "coordinates": [ 120.843831111292033, 31.040983578057801 ] } },
+{ "type": "Feature", "properties": { "Name": "DY412", "Type": "TIDAL", "InvertEL": 0.871, "FixedStage": 0, "CurveNum": "TDY412" }, "geometry": { "type": "Point", "coordinates": [ 120.840881830448467, 31.03470286623671 ] } },
+{ "type": "Feature", "properties": { "Name": "AY131", "Type": "TIDAL", "InvertEL": -1.488, "FixedStage": 0, "CurveNum": "TAY131" }, "geometry": { "type": "Point", "coordinates": [ 120.846572004491193, 31.041907505876004 ] } },
+{ "type": "Feature", "properties": { "Name": "BY113-1", "Type": "TIDAL", "InvertEL": -1.13, "FixedStage": 0, "CurveNum": "TBY113-1" }, "geometry": { "type": "Point", "coordinates": [ 120.850087837290332, 31.034580996805616 ] } },
+{ "type": "Feature", "properties": { "Name": "BY181-5", "Type": "TIDAL", "InvertEL": -2.424, "FixedStage": 0, "CurveNum": "TBY181-5" }, "geometry": { "type": "Point", "coordinates": [ 120.85179988376666, 31.03580792143617 ] } },
+{ "type": "Feature", "properties": { "Name": "BY112-1", "Type": "TIDAL", "InvertEL": -1.142, "FixedStage": 0, "CurveNum": "TBY112-1" }, "geometry": { "type": "Point", "coordinates": [ 120.850296340496769, 31.034598429811524 ] } },
+{ "type": "Feature", "properties": { "Name": "BY26-2", "Type": "TIDAL", "InvertEL": -0.316, "FixedStage": 0, "CurveNum": "TBY26-2" }, "geometry": { "type": "Point", "coordinates": [ 120.850941972817736, 31.037030031985143 ] } },
+{ "type": "Feature", "properties": { "Name": "BY25-2", "Type": "TIDAL", "InvertEL": -1.824, "FixedStage": 0, "CurveNum": "TBY25-2" }, "geometry": { "type": "Point", "coordinates": [ 120.85077675167301, 31.037037497211582 ] } },
+{ "type": "Feature", "properties": { "Name": "AY213CSK", "Type": "TIDAL", "InvertEL": -0.386, "FixedStage": 0, "CurveNum": "TAY213CSK" }, "geometry": { "type": "Point", "coordinates": [ 120.850830000510996, 31.036746802279861 ] } },
+{ "type": "Feature", "properties": { "Name": "CSK4", "Type": "TIDAL", "InvertEL": -1.586, "FixedStage": 0, "CurveNum": "TCSK4" }, "geometry": { "type": "Point", "coordinates": [ 120.849409322984428, 31.033402773057812 ] } },
+{ "type": "Feature", "properties": { "Name": "BY180-3", "Type": "TIDAL", "InvertEL": -0.934, "FixedStage": 0, "CurveNum": "TBY180-3" }, "geometry": { "type": "Point", "coordinates": [ 120.852010931175244, 31.035551307941827 ] } },
+{ "type": "Feature", "properties": { "Name": "AY16-2", "Type": "TIDAL", "InvertEL": -2.231, "FixedStage": 0, "CurveNum": "TAY16-2" }, "geometry": { "type": "Point", "coordinates": [ 120.848556907247556, 31.03207608940798 ] } },
+{ "type": "Feature", "properties": { "Name": "AY54-19", "Type": "TIDAL", "InvertEL": -1.411, "FixedStage": 0, "CurveNum": "TAY54-19" }, "geometry": { "type": "Point", "coordinates": [ 120.848901330006328, 31.035914332528371 ] } },
+{ "type": "Feature", "properties": { "Name": "AY55-12", "Type": "TIDAL", "InvertEL": -1.816, "FixedStage": 0, "CurveNum": "TAY55-12" }, "geometry": { "type": "Point", "coordinates": [ 120.846177575893407, 31.035561392637614 ] } },
+{ "type": "Feature", "properties": { "Name": "myoutfall1", "Type": "TIDAL", "InvertEL": -3.0, "FixedStage": 0, "CurveNum": "Tmyoutfall1" }, "geometry": { "type": "Point", "coordinates": [ 120.846293043345852, 31.042071877848493 ] } },
+{ "type": "Feature", "properties": { "Name": "myoutfall2", "Type": "TIDAL", "InvertEL": -1.6, "FixedStage": 0, "CurveNum": "Tmyoutfall2" }, "geometry": { "type": "Point", "coordinates": [ 120.850950936456044, 31.036747252334091 ] } }
+]
+}

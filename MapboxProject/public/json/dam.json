@@ -1,0 +1,14 @@
+{
+"type": "FeatureCollection",
+"name": "dam",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "cell_id": 1, "height": 2, "width": 10, "orient": "S", "C": 1.7, "MLimit": 0.9, "length": 134.13558930811044 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.852246800788464, 31.035496563676144 ], [ 120.853635813261278, 31.035544051122759 ] ] } },
+{ "type": "Feature", "properties": { "cell_id": 2, "height": 2, "width": 10, "orient": "S", "C": 1.7, "MLimit": 0.9, "length": 149.91324744237747 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.851910242164394, 31.035469053671115 ], [ 120.850446398556045, 31.0353948951897 ], [ 120.85037422320481, 31.035324189735633 ] ] } },
+{ "type": "Feature", "properties": { "cell_id": 3, "height": 2, "width": 10, "orient": "W", "C": 1.7, "MLimit": 0.9, "length": 79.382154788556448 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.85037422320481, 31.035324189735633 ], [ 120.850378710152143, 31.034643947604511 ] ] } },
+{ "type": "Feature", "properties": { "cell_id": 4, "height": 2, "width": 10, "orient": "N", "C": 1.7, "MLimit": 0.9, "length": 99.00532260546683 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.851885566254623, 31.03518763226722 ], [ 120.850848920169668, 31.035165835574976 ] ] } },
+{ "type": "Feature", "properties": { "cell_id": 5, "height": 2, "width": 10, "orient": "E", "C": 1.7, "MLimit": 0.9, "length": 51.563828933172765 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.850848920169668, 31.035165835574976 ], [ 120.850679727128409, 31.03483764026765 ], [ 120.850695420237571, 31.034732539185587 ] ] } },
+{ "type": "Feature", "properties": { "cell_id": 6, "height": 2, "width": 10, "orient": "N", "C": 1.7, "MLimit": 0.9, "length": 117.78328931967179 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.845001326959363, 31.035767426263895 ], [ 120.845350109010639, 31.03572218852074 ], [ 120.845798524180594, 31.035661979048108 ], [ 120.846225149373709, 31.035644864382899 ] ] } },
+{ "type": "Feature", "properties": { "cell_id": 7, "height": 2, "width": 10, "orient": "N", "C": 1.7, "MLimit": 0.9, "length": 193.87642704772912 }, "geometry": { "type": "LineString", "coordinates": [ [ 120.847011934823286, 31.035615839090145 ], [ 120.847643241367493, 31.035554422691099 ], [ 120.847865226269718, 31.035586372973537 ], [ 120.848927602629416, 31.036008924173025 ] ] } }
+]
+}
