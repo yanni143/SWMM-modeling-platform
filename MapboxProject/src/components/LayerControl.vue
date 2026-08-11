@@ -1,7 +1,7 @@
 <template>
   <section class="layer-control" :class="{ collapsed: isCollapsed }" aria-label="工程图层">
     <button class="layer-top" type="button" :aria-expanded="!isCollapsed" @click="toggleCollapse">
-      <span>工程图层</span>
+      <span>图层管理</span>
       <i aria-hidden="true">{{ isCollapsed ? '+' : '−' }}</i>
     </button>
 

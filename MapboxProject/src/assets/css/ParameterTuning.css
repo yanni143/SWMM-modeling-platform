@@ -1,4 +1,4 @@
-.tuning-workspace { margin-top: 22px; padding-top: 15px; border-top: 2px solid #23748c; }
+.tuning-workspace { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--ink); }
 .tuning-heading, .change-ruler-title, .object-identity, .version-created { display: flex; align-items: center; justify-content: space-between; }
 .tuning-heading small, .version-created small { color: #23748c; font: 9px Consolas, monospace; letter-spacing: .14em; }
 .tuning-heading h3 { margin: 2px 0 0; font-size: 14px; }

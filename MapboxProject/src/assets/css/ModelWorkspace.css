@@ -138,7 +138,7 @@
 .reset-action {
   width: 100%;
   min-height: 36px;
-  margin-top: 22px;
+  margin-top: 0;
   color: #6f4339;
   border: 1px solid rgba(133, 56, 46, 0.38);
   background: rgba(180, 82, 66, 0.06);
