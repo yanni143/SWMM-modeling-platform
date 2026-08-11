@@ -20,4 +20,4 @@ sed \
 
 chmod 600 "${TARGET}"
 echo "已生成 ${TARGET}"
-echo "请编辑 VITE_MAPBOX_ACCESS_TOKEN；使用域名时也要修改 SITE_ADDRESS 和 CORS_ORIGINS。"
+echo "请编辑 VITE_MAPBOX_ACCESS_TOKEN；使用域名时也要修改 CORS_ORIGINS。"

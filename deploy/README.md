@@ -1,68 +1,50 @@
-# 腾讯云 Docker 部署手册
+# 腾讯云共享服务器部署手册
 
-本方案面向 Ubuntu 24.04。第一次部署可通过公网 IP 使用 HTTP；有域名后只需修改生产环境变量即可由 Caddy 自动启用 HTTPS。
+本方案适用于 Ubuntu 24.04，尤其是已经运行其他 Docker 容器和宿主机 Nginx 的服务器。
 
-## 1. 修复 Docker 权限并初始化服务器
-
-错误：
+SWMM 使用独立的 PostgreSQL、MinIO、Docker 网络和命名卷，不复用或修改服务器现有的 `jssdc-*` 服务。前端容器使用 Nginx，并且默认只监听宿主机 `127.0.0.1:18084`；公网流量由宿主机现有 Nginx 统一接入。
 
 ```text
-permission denied while trying to connect to the Docker daemon socket
+浏览器 → 宿主机 Nginx :80/:443 → 127.0.0.1:18084
+                                      ↓
+                              SWMM 前端 Nginx
+                                ├─ Vue 静态文件
+                                └─ /api → FastAPI
+                                           ├─ PostgreSQL
+                                           └─ MinIO
 ```
 
-说明 Docker 已安装，但当前登录用户不在 `docker` 用户组。把项目上传到服务器后，在仓库根目录运行：
+## 1. 部署前检查
 
 ```bash
-sudo bash deploy/server-bootstrap.sh
-```
-
-脚本会安装必要工具、在需要时安装 Docker，并将当前 sudo 用户加入 `docker` 组。完成后必须退出 SSH 并重新登录：
-
-```bash
-exit
-ssh ubuntu@你的服务器公网IP
 docker ps
 docker compose version
+sudo ss -lntp | grep -E ':(80|443|18084)\b'
+free -h
+df -h
 ```
 
-如果暂时还没上传项目，也可先手动修复已有 Docker：
+当前服务器若已经能正常执行 `docker ps` 和 `docker compose version`，不要运行 `server-bootstrap.sh`，也不要为了本项目重启 Docker。该脚本只用于全新服务器安装缺失工具；即使运行，新版本也不会重启 Docker 或修改 `/etc/docker/daemon.json`。
 
-```bash
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-newgrp docker
-docker ps
-```
-
-`newgrp docker` 会开启一个具有新用户组的子 Shell；重新登录 SSH 是更彻底的做法。
+对于已有业务的共享服务器，系统升级、服务器重启和 Docker 升级都应安排维护时间。
 
 ## 2. 腾讯云安全组
 
-入站只开放：
+公开服务通常只需要：
 
 | 端口 | 来源 | 用途 |
 |---|---|---|
-| 22/TCP | 你的公网 IP，练习时可临时放宽 | SSH |
-| 80/TCP | 练习时设为你的公网 IP；公开后改为 `0.0.0.0/0` | HTTP |
-| 443/TCP | 练习时设为你的公网 IP；公开后改为 `0.0.0.0/0` | HTTPS |
+| 22/TCP | 管理员公网 IP | SSH |
+| 80/TCP | `0.0.0.0/0` | 宿主机 Nginx HTTP |
+| 443/TCP | `0.0.0.0/0` | 宿主机 Nginx HTTPS |
 
-不要开放 5432、8000、9000、9001。它们只在 `swmm-internal` Docker 网络中通信。
+不要为 SWMM 开放 5432、8000、9000、9001 或 18084。`18084` 默认只绑定 `127.0.0.1`，无法从公网直接访问。
 
-服务器欢迎信息里的 `10.0.0.12` 是腾讯云私网 IP。浏览器访问时应使用控制台显示的公网 IP。
-
-你的服务器当前提示有大量系统和安全更新。第一次部署前建议执行：
-
-```bash
-sudo apt update
-sudo apt upgrade -y
-if [[ -f /var/run/reboot-required ]]; then sudo reboot; fi
-```
-
-重启后重新 SSH 登录，再继续下面的步骤。
+同时检查现有 Redis、PostgreSQL 和 MinIO 的 6379、5432、9000 是否被安全组拦截，避免数据库和对象存储直接暴露公网。
 
 ## 3. 上传仓库
 
-推荐在服务器上使用 Git：
+推荐使用 Git：
 
 ```bash
 sudo mkdir -p /opt/swmm
@@ -71,17 +53,22 @@ git clone 你的仓库地址 /opt/swmm/app
 cd /opt/swmm/app
 ```
 
-也可从 Windows PowerShell 上传当前工作目录：
+仓库已经存在时：
+
+```bash
+cd /opt/swmm/app
+git pull --ff-only
+```
+
+也可以从 Windows PowerShell 上传：
 
 ```powershell
 scp -r E:\SWMM ubuntu@服务器公网IP:/opt/swmm/app
 ```
 
-不要上传本地 `.env`。生产配置由下一步单独生成。
+不要上传本地 `.env`，也不要把生产密码提交到 Git。
 
 ## 4. 生成生产环境变量
-
-在服务器仓库根目录执行：
 
 ```bash
 cd /opt/swmm/app
@@ -89,20 +76,27 @@ bash deploy/generate-env.sh
 nano .env.production
 ```
 
-脚本会生成随机的 PostgreSQL 和 MinIO 密码，并将文件权限设置为 `600`。第一次使用公网 IP 练习时保留：
-
-```dotenv
-SITE_ADDRESS=:80
-VITE_API_BASE_URL=/
-```
-
-必须填写：
+脚本会生成随机 PostgreSQL 和 MinIO 密码，并把文件权限设置为 `600`。必须填写：
 
 ```dotenv
 VITE_MAPBOX_ACCESS_TOKEN=你的Mapbox公开Token
 ```
 
-不要把 `.env.production` 提交到 Git，也不要在聊天或截图中公开它。
+共享服务器保持以下配置：
+
+```dotenv
+WEB_BIND_ADDRESS=127.0.0.1
+WEB_PORT=18084
+VITE_API_BASE_URL=/
+```
+
+使用域名时可设置：
+
+```dotenv
+CORS_ORIGINS=https://swmm.example.com
+```
+
+前端和 API 实际为同源访问，宿主机 Nginx 会把请求完整转发到容器端口。
 
 ## 5. 第一次部署
 
@@ -111,21 +105,27 @@ cd /opt/swmm/app
 bash deploy/deploy.sh deploy
 ```
 
-脚本依次执行：
+脚本会：
 
 1. 检查环境文件和占位值。
 2. 校验 Compose 配置。
-3. 拉取 PostgreSQL、MinIO 基础镜像。
-4. 构建前端和后端镜像。
-5. 启动容器。
-6. 后端启动时自动执行 `alembic upgrade head`。
-7. 等待 `/health` 同时返回数据库和 MinIO 正常。
+3. 拉取独立 PostgreSQL、MinIO 镜像。
+4. 构建 Nginx/Vue 前端和 FastAPI/PySWMM 后端。
+5. 启动独立容器、网络和数据卷。
+6. 自动执行 `alembic upgrade head`。
+7. 初始化固定研究区 V1。
+8. 验证数据库和 MinIO 健康状态。
 
-部署成功后访问：
+SWMM Compose 不会停止或修改任何 `jssdc-*` 容器。
 
-```text
-http://服务器公网IP
-http://服务器公网IP/health
+## 6. 部署后验证
+
+服务器本机检查：
+
+```bash
+bash deploy/deploy.sh status
+curl http://127.0.0.1:18084/health
+curl -I http://127.0.0.1:18084/
 ```
 
 健康接口应返回：
@@ -134,30 +134,79 @@ http://服务器公网IP/health
 {"status":"ok","checks":{"database":"ok","minio":"ok"}}
 ```
 
-## 6. 常用运维命令
+还没有域名或宿主机 Nginx 配置时，可以通过 SSH 隧道练习，不需要开放 18084：
+
+```powershell
+ssh -L 18084:127.0.0.1:18084 ubuntu@服务器公网IP
+```
+
+保持该 SSH 窗口打开，在本机浏览器访问：
+
+```text
+http://127.0.0.1:18084
+http://127.0.0.1:18084/health
+```
+
+如果确实需要临时通过公网端口练习，可把 `.env.production` 改为 `WEB_BIND_ADDRESS=0.0.0.0`，并仅向自己的公网 IP 放行安全组 18084。练习完成后应恢复 `127.0.0.1` 并重新部署。
+
+## 7. 接入宿主机 Nginx
+
+仓库提供了 `deploy/nginx-swmm.conf.example`。先复制并修改域名：
 
 ```bash
-# 查看状态
+sudo cp /opt/swmm/app/deploy/nginx-swmm.conf.example /etc/nginx/sites-available/swmm.conf
+sudo nano /etc/nginx/sites-available/swmm.conf
+```
+
+把：
+
+```nginx
+server_name swmm.example.com;
+```
+
+替换成实际域名。启用配置：
+
+```bash
+sudo ln -s /etc/nginx/sites-available/swmm.conf /etc/nginx/sites-enabled/swmm.conf
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+如果现有 Nginx 不使用 `sites-available/sites-enabled`，可把配置复制到它实际包含的 `conf.d` 目录。先用下面命令确认，不要覆盖现有配置：
+
+```bash
+sudo nginx -T 2>/dev/null | grep -nE 'include|server_name|listen'
+```
+
+`nginx -t` 必须成功后才能执行 `reload`。使用 `reload`，不要为了增加站点执行 `restart`。
+
+HTTPS 证书由宿主机现有 Nginx 的证书管理方式统一配置。本项目容器不再申请或保存证书。
+
+## 8. 常用运维命令
+
+```bash
+# 状态
 bash deploy/deploy.sh status
 
-# 查看全部日志
+# 全部日志
 bash deploy/deploy.sh logs
 
-# 只看后端日志
+# 后端日志
 bash deploy/deploy.sh logs backend
 
-# 重启
+# 前端 Nginx 日志
+bash deploy/deploy.sh logs web
+
+# 重启 SWMM 容器
 bash deploy/deploy.sh restart
 
-# 停止容器，但保留数据库和 MinIO 数据卷
+# 停止 SWMM 容器，保留数据卷
 bash deploy/deploy.sh stop
 ```
 
-不要执行 `docker compose down -v`，其中 `-v` 会删除 PostgreSQL、MinIO 和证书数据卷。
+不要执行 `docker compose down -v`，`-v` 会删除 SWMM 的 PostgreSQL 和 MinIO 数据卷。
 
-## 7. 后续更新部署
-
-先备份，再拉取代码并重新发布：
+## 9. 后续更新
 
 ```bash
 cd /opt/swmm/app
@@ -166,115 +215,55 @@ git pull --ff-only
 bash deploy/deploy.sh update
 ```
 
-`update` 会重建有变化的镜像，并保留命名数据卷。前端的 `VITE_*` 变量在构建时写入，因此修改 Mapbox Token 后也必须执行一次 `update`。
+更新会保留 SWMM 命名卷，不影响服务器其他项目。`VITE_*` 变量会在前端构建时写入，因此修改 Mapbox Token 后也要运行 `update`。
 
-如果采用 SCP 上传，不执行 `git pull`，覆盖代码后直接运行 `update`。
-
-## 8. 备份
-
-手动备份：
+## 10. 备份
 
 ```bash
 bash deploy/backup.sh
 ```
 
-备份默认写入：
+备份目录：
 
 ```text
 backups/年月日-时分秒/postgres.dump
 backups/年月日-时分秒/minio/
 ```
 
-这些备份仍在同一台服务器上，必须继续复制到腾讯云 COS、本地电脑或另一块云硬盘。建议同时在腾讯云控制台启用每日云硬盘快照。
+同机备份不能防止整机故障，应继续复制到腾讯云 COS、另一块云硬盘或本地电脑。
 
-数据库恢复示例应在确认目标数据库和备份文件后执行：
+## 11. 故障排查
 
-```bash
-cat backups/时间/postgres.dump | docker compose --env-file .env.production -f compose.prod.yaml exec -T db pg_restore -U swmm -d fenhuModel --clean --if-exists
-```
-
-恢复会覆盖数据库对象，不要在未备份时试运行。
-
-## 9. 以后绑定域名和 HTTPS
-
-先把域名 A 记录解析到服务器公网 IP，并确认腾讯云安全组开放 80、443。然后修改：
-
-```dotenv
-SITE_ADDRESS=swmm.example.com
-CORS_ORIGINS=https://swmm.example.com
-```
-
-重新部署：
-
-```bash
-bash deploy/deploy.sh update
-```
-
-Caddy 会自动申请证书并把 HTTP 跳转到 HTTPS。证书数据保存在 `caddy-data` 命名卷中。
-
-如果使用腾讯云中国大陆服务器，域名对外提供服务前需要完成 ICP 备案。公网 IP 练习阶段可以先验证应用和容器是否正常。
-
-## 10. 故障排查
-
-### Docker 仍然 permission denied
-
-```bash
-id
-getent group docker
-ls -l /var/run/docker.sock
-```
-
-确认用户名出现在 docker 组后退出 SSH 并重新登录。不要长期用 `chmod 666 /var/run/docker.sock`，这会让所有本机用户获得接近 root 的容器控制权限。
-
-### 页面打不开
-
-依次检查：
+### 18084 没有监听
 
 ```bash
 bash deploy/deploy.sh status
-curl -v http://127.0.0.1/health
-sudo ss -lntp | grep -E ':80|:443'
+bash deploy/deploy.sh logs web
+sudo ss -lntp | grep 18084
 ```
 
-本机正常而外部打不开，通常是腾讯云安全组没有放行 80/443，或者访问了私网 IP `10.0.0.12`。
-
-### 后端显示 degraded
+### 健康状态 degraded
 
 ```bash
 bash deploy/deploy.sh logs backend
 docker compose --env-file .env.production -f compose.prod.yaml logs --tail=100 db minio
 ```
 
-常见原因是环境文件里的数据库密码出现不一致、MinIO 尚未启动完成，或者旧数据卷由另一组账号创建。
+### 宿主机 Nginx 返回 502
 
-### 拉取 Docker Hub 镜像超时
+```bash
+curl -v http://127.0.0.1:18084/health
+sudo nginx -t
+sudo tail -n 100 /var/log/nginx/error.log
+```
 
-初始化脚本会在 `/etc/docker/daemon.json` 不存在时配置腾讯云内网镜像加速。如果服务器已经有该文件，脚本不会覆盖，可检查：
+### Docker Hub 拉取超时
+
+共享服务器不要未经评估直接重启 Docker。先检查现有配置：
 
 ```bash
 sudo cat /etc/docker/daemon.json
 docker info | sed -n '/Registry Mirrors/,+3p'
 ```
 
-需要手动配置时，将下面字段合并进现有 JSON，而不是直接覆盖其他 Docker 配置：
-
-```json
-{
-  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"]
-}
-```
-
-然后执行：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-```
-
-### 前端地图不显示
-
-检查浏览器开发者工具，以及 `.env.production` 中的 `VITE_MAPBOX_ACCESS_TOKEN`。Token 修改后需要重新构建前端：
-
-```bash
-bash deploy/deploy.sh update
-```
+需要增加镜像源或升级 Docker 时，应与现有 `jssdc` 系统一起安排维护窗口。

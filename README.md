@@ -60,13 +60,13 @@ npm install
 npm run dev
 ```
 
-开发服务器会把 `/api` 和 `/health` 代理到 `http://localhost:8000`；生产环境由 Caddy 同源代理。
+开发服务器会把 `/api` 和 `/health` 代理到 `http://localhost:8000`；生产环境由容器 Nginx 同源代理。
 
 ## 腾讯云生产部署
 
 仓库提供了一套适用于 Ubuntu 24.04 的 Docker Compose 部署配置：
 
-- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Caddy/Vue。
+- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Nginx/Vue。
 - `.env.production.example`：生产环境变量模板。
 - `deploy/server-bootstrap.sh`：服务器初始化和 Docker 权限配置。
 - `deploy/generate-env.sh`：生成随机数据库与 MinIO 密码。
