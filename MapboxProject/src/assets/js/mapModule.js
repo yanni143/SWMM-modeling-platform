@@ -4,7 +4,7 @@ function getPaint(type, source = 'inp') {
   if (type === 'fill') {
     return {
       'fill-color': color,
-      'fill-opacity': isResult ? 0.5 : 0.24,
+      'fill-opacity': isResult ? 0.3 : 0.24,
       'fill-outline-color': color,
     }
   }

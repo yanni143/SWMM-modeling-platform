@@ -135,6 +135,19 @@
 .run-action:hover { color: white; background: var(--water); }
 .run-action:disabled { cursor: wait; opacity: 0.5; }
 
+.reset-action {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 22px;
+  color: #6f4339;
+  border: 1px solid rgba(133, 56, 46, 0.38);
+  background: rgba(180, 82, 66, 0.06);
+  font: 600 12px/1 inherit;
+  cursor: pointer;
+}
+.reset-action:hover { color: white; background: #8d4a3d; }
+.reset-action:disabled { cursor: wait; opacity: 0.5; }
+
 .error-message {
   margin: 10px 0 0;
   padding: 9px 11px;

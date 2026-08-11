@@ -67,9 +67,23 @@ export interface ProjectGeoJsonLayer {
 
 export interface ProjectRunResponse {
   run_id: string
+  model_version_id: string
+  version: number
   status: string
   layers: ProjectGeoJsonLayer[]
   artifacts: Array<Record<string, unknown>>
+}
+
+export interface ModelResultSummary {
+  version_id: string
+  version: number
+  effective_run_id: string
+  created_at: string
+  finished_at: string | null
+}
+
+export interface VersionResultLayers extends ModelResultSummary {
+  layers: ProjectGeoJsonLayer[]
 }
 
 export interface EditableField {
@@ -149,6 +163,23 @@ export async function fetchProjectLayers(versionId: string): Promise<ProjectGeoJ
 
 export function runProjectVersion(versionId: string): Promise<ProjectRunResponse> {
   return request(`/api/model-versions/${versionId}/runs`, { method: 'POST' })
+}
+
+export function fetchModelResults(): Promise<ModelResultSummary[]> {
+  return request('/api/model-results')
+}
+
+export function fetchLatestVersionResultLayers(versionId: string): Promise<VersionResultLayers> {
+  return request(`/api/model-versions/${versionId}/latest-result/layers`)
+}
+
+export function fetchLatestVersionTimeSeries(
+  versionId: string,
+  layerId: string,
+  featureName: string,
+): Promise<{ type: 'FeatureCollection'; features: Array<Record<string, any>> }> {
+  const params = new URLSearchParams({ layer_id: layerId, feature_name: featureName })
+  return request(`/api/model-versions/${versionId}/latest-result/timeseries?${params}`)
 }
 
 export async function fetchEditableParameters(versionId: string): Promise<EditableGroup[]> {

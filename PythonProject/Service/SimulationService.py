@@ -4,15 +4,16 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from config import get_settings
-from models.domain import RunArtifact, SimulationRun
+from models.domain import ModelVersion, RunArtifact, SimulationRun
 from Service.ModelService import ModelNotFoundError, ModelService
 from Service.SWMMService import SwmmService
 from storage.artifact_storage import ArtifactStorageService, StoredObject
 from swmm_core.result_geojson import (
+    latest_time_step_layers,
     parse_result_layers,
     write_result_layers,
 )
@@ -23,6 +24,16 @@ class SimulationRunError(RuntimeError):
 
 
 class SimulationService:
+    LAYER_DEFINITIONS = {
+        "result-subcatchments.geojson": (
+            "result-subcatchments",
+            "子汇水区模拟结果",
+            "fill",
+        ),
+        "result-conduits.geojson": ("result-conduits", "管线模拟结果", "line"),
+        "result-nodes.geojson": ("result-nodes", "节点模拟结果", "circle"),
+    }
+
     def __init__(self, storage: ArtifactStorageService | None = None) -> None:
         self.settings = get_settings()
         self.storage = storage or ArtifactStorageService()
@@ -86,7 +97,7 @@ class SimulationService:
             run.finished_at = datetime.now(timezone.utc)
             session.commit()
             session.refresh(run)
-            return run, layers
+            return run, latest_time_step_layers(layers)
         except Exception as exc:
             session.rollback()
             run = session.get(SimulationRun, run.id)
@@ -103,22 +114,125 @@ class SimulationService:
         run = session.get(SimulationRun, run_id)
         if not run or run.model_id != self.settings.fixed_model_id:
             raise SimulationRunError("运行记录不存在")
+        return self._load_layer_artifacts(session, run)
+
+    def list_latest_successful_results(
+        self, session: Session
+    ) -> list[tuple[SimulationRun, ModelVersion]]:
+        rank = func.row_number().over(
+            partition_by=SimulationRun.model_version_id,
+            order_by=(
+                SimulationRun.started_at.desc(),
+                SimulationRun.created_at.desc(),
+                SimulationRun.id.desc(),
+            ),
+        ).label("result_rank")
+        ranked = (
+            select(SimulationRun.id.label("run_id"), rank)
+            .where(
+                SimulationRun.model_id == self.settings.fixed_model_id,
+                SimulationRun.status == "success",
+            )
+            .subquery()
+        )
+        return list(
+            session.execute(
+                select(SimulationRun, ModelVersion)
+                .join(ranked, ranked.c.run_id == SimulationRun.id)
+                .join(ModelVersion, ModelVersion.id == SimulationRun.model_version_id)
+                .where(ranked.c.result_rank == 1)
+                .order_by(ModelVersion.version.desc())
+            ).all()
+        )
+
+    def get_latest_successful_result(
+        self, session: Session, version_id: uuid.UUID
+    ) -> tuple[SimulationRun, ModelVersion]:
+        try:
+            version = ModelService(storage=self.storage).get_version(session, version_id)
+        except ModelNotFoundError as exc:
+            raise SimulationRunError("工程版本不存在") from exc
+        run = session.scalar(
+            select(SimulationRun)
+            .where(
+                SimulationRun.model_version_id == version.id,
+                SimulationRun.status == "success",
+            )
+            .order_by(
+                SimulationRun.started_at.desc(),
+                SimulationRun.created_at.desc(),
+                SimulationRun.id.desc(),
+            )
+            .limit(1)
+        )
+        if not run:
+            raise SimulationRunError("该版本还没有成功的模拟结果")
+        return run, version
+
+    def get_latest_version_layers(
+        self, session: Session, version_id: uuid.UUID
+    ) -> tuple[SimulationRun, ModelVersion, list[dict]]:
+        run, version = self.get_latest_successful_result(session, version_id)
+        return run, version, self._load_layer_artifacts(session, run)
+
+    def get_latest_version_timeseries(
+        self,
+        session: Session,
+        version_id: uuid.UUID,
+        layer_id: str,
+        feature_name: str,
+    ) -> dict:
+        run, _ = self.get_latest_successful_result(session, version_id)
+        filename = next(
+            (
+                artifact_filename
+                for artifact_filename, definition in self.LAYER_DEFINITIONS.items()
+                if definition[0] == layer_id
+            ),
+            None,
+        )
+        if not filename:
+            raise SimulationRunError("不支持的模拟结果图层")
+        artifact = session.scalar(
+            select(RunArtifact).where(
+                RunArtifact.run_id == run.id,
+                RunArtifact.artifact_type == "visual",
+                RunArtifact.filename == filename,
+            )
+        )
+        if not artifact:
+            raise SimulationRunError("该版本缺少对应的结果图层")
+
+        runtime = self.settings.resolved_runtime_dir
+        runtime.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=f"timeseries-{run.id}-", dir=runtime) as directory:
+            path = Path(directory) / artifact.filename
+            self.storage.download_to(artifact.object_key, path, bucket=artifact.bucket)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        features = [
+            feature
+            for feature in payload.get("features", [])
+            if feature.get("properties", {}).get("name") == feature_name
+        ]
+        features.sort(key=lambda feature: feature.get("properties", {}).get("time", 0))
+        return {"type": "FeatureCollection", "features": features}
+
+    def _load_layer_artifacts(
+        self, session: Session, run: SimulationRun
+    ) -> list[dict]:
         artifacts = list(
             session.scalars(
                 select(RunArtifact)
-                .where(RunArtifact.run_id == run_id, RunArtifact.artifact_type == "visual")
+                .where(RunArtifact.run_id == run.id, RunArtifact.artifact_type == "visual")
                 .order_by(RunArtifact.filename)
             )
         )
-        definitions = {
-            "result-subcatchments.geojson": ("result-subcatchments", "子汇水区模拟结果", "fill"),
-            "result-conduits.geojson": ("result-conduits", "管线模拟结果", "line"),
-            "result-nodes.geojson": ("result-nodes", "节点模拟结果", "circle"),
-        }
         layers = []
-        with tempfile.TemporaryDirectory(prefix=f"layers-{run_id}-", dir=self.settings.resolved_runtime_dir) as directory:
+        runtime = self.settings.resolved_runtime_dir
+        runtime.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=f"layers-{run.id}-", dir=runtime) as directory:
             for artifact in artifacts:
-                definition = definitions.get(artifact.filename)
+                definition = self.LAYER_DEFINITIONS.get(artifact.filename)
                 if not definition:
                     continue
                 path = Path(directory) / artifact.filename
@@ -133,7 +247,7 @@ class SimulationService:
                         "geojson": json.loads(path.read_text(encoding="utf-8")),
                     }
                 )
-        return layers
+        return latest_time_step_layers(layers)
 
     @staticmethod
     def artifact_payload(run: SimulationRun) -> list[dict]:

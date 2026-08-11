@@ -38,6 +38,10 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 
 选择工程版本后可调用 `POST /api/model-versions/{version_id}/runs`。后端从 MinIO 下载 INP，在临时目录运行 PySWMM，解析 OUT，并将输入、OUT、RPT 和结果 GeoJSON 全部写回 MinIO。临时目录会在请求结束后删除。
 
+每次运行都会生成独立的数据库记录和 `runs/{run_id}` MinIO 对象，不覆盖物理历史。用户侧按版本查看结果：`GET /api/model-results` 对每个版本只返回最新一次成功运行，地图和弹窗分别通过 `/api/model-versions/{version_id}/latest-result/layers` 与 `/latest-result/timeseries` 查询同一份有效结果。失败运行不会替换该版本上一次成功结果。
+
+前端会在浏览器中保存当前版本、活动结果版本、图层顺序和显隐状态，刷新后自动恢复。点击“恢复初始状态”只会回到 V1、清除当前 RUN 图层并恢复默认图层顺序，不会删除数据库版本、运行记录或 MinIO 文件。
+
 ## 安全调参流程
 
 调参只开放白名单中的常用低风险字段：子汇水区面积/不透水率/宽度/坡度、地表曼宁系数与洼蓄量、常用下渗参数、节点与排口高程、节点最大深度、管线长度/粗糙度以及圆管管径。拓扑、控制规则和复杂断面不开放修改。

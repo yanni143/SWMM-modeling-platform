@@ -67,10 +67,13 @@ def build_geojson_layers(
                 continue
 
     node_properties: dict[str, dict] = {}
-    for section in ("JUNCTIONS", "OUTFALLS", "STORAGE"):
+    for section in ("JUNCTIONS", "OUTFALLS", "DIVIDERS"):
         for name, properties in _properties_by_name(sections, section).items():
             node_properties[name] = {**properties, "element_type": section.lower()}
 
+    # Some exported INP files also put subcatchment label/centroid coordinates in
+    # [COORDINATES]. Keep the complete coordinate index for link endpoints, but
+    # only render identifiers that are declared in an actual SWMM node section.
     node_features = [
         {
             "type": "Feature",
@@ -78,6 +81,7 @@ def build_geojson_layers(
             "properties": {"name": name, **node_properties.get(name, {})},
         }
         for name, point in coordinates.items()
+        if name in node_properties
     ]
 
     vertices: dict[str, list[list[float]]] = defaultdict(list)

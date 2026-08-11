@@ -4,8 +4,10 @@ from pathlib import Path
 
 import models  # noqa: F401
 from config import get_settings
+from Controller.controller import app
 from database.base import Base
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
+from swmm_core.result_geojson import latest_time_step_layers
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpParameterEditor import (
@@ -46,6 +48,12 @@ class FakeMinio:
 
 
 class FoundationTests(unittest.TestCase):
+    def test_version_result_routes_are_exposed(self) -> None:
+        paths = app.openapi()["paths"]
+        self.assertIn("/api/model-results", paths)
+        self.assertIn("/api/model-versions/{version_id}/latest-result/layers", paths)
+        self.assertIn("/api/model-versions/{version_id}/latest-result/timeseries", paths)
+
     def test_builtin_inp_is_valid_and_upload_route_is_absent(self) -> None:
         validation = validate_inp_file(get_settings().resolved_fixed_inp_path)
         self.assertIn("OPTIONS", validation.sections)
@@ -124,7 +132,11 @@ J1 10.0 3.0 0 0 0
             "JUNCTIONS": ["J1 0 2", "J2 0 2"],
             "CONDUITS": ["C1 J1 J2 100 0.013 0 0"],
             "SUBCATCHMENTS": ["S1 RG1 J1 1 30 50 1 0"],
-            "COORDINATES": ["J1 120.1 31.1", "J2 120.2 31.2"],
+            "COORDINATES": [
+                "J1 120.1 31.1",
+                "J2 120.2 31.2",
+                "S1 120.15 31.15",
+            ],
             "VERTICES": ["C1 120.15 31.16"],
             "POLYGONS": ["S1 120.1 31.1", "S1 120.2 31.1", "S1 120.2 31.2"],
         }
@@ -139,6 +151,10 @@ J1 10.0 3.0 0 0 0
             layers[1]["geojson"]["features"][0]["geometry"]["type"], "LineString"
         )
         self.assertEqual(len(layers[2]["geojson"]["features"]), 2)
+        self.assertEqual(
+            {feature["properties"]["name"] for feature in layers[2]["geojson"]["features"]},
+            {"J1", "J2"},
+        )
 
     def test_projected_inp_coordinates_are_converted_for_mapbox(self) -> None:
         sections = {
@@ -152,6 +168,32 @@ J1 10.0 3.0 0 0 0
         self.assertAlmostEqual(point[0], 120.848921, places=5)
         self.assertAlmostEqual(point[1], 31.039645, places=5)
         self.assertEqual(layers[0]["display_crs"], "EPSG:4326")
+
+    def test_map_result_layers_only_keep_latest_time_step(self) -> None:
+        features = [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [120.1, 31.1]},
+                "properties": {"name": name, "time": time},
+            }
+            for name in ("J1", "J2")
+            for time in (0, 1, 2)
+        ]
+        layers = [
+            {
+                "id": "result-nodes",
+                "geojson": {"type": "FeatureCollection", "features": features},
+            }
+        ]
+
+        latest = latest_time_step_layers(layers)
+
+        self.assertEqual(len(latest[0]["geojson"]["features"]), 2)
+        self.assertEqual(
+            {feature["properties"]["time"] for feature in latest[0]["geojson"]["features"]},
+            {2},
+        )
+        self.assertEqual(len(layers[0]["geojson"]["features"]), 6)
 
     def test_parameter_catalog_joins_safe_fields_by_object(self) -> None:
         sections = {

@@ -15,12 +15,12 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import '@/assets/css/MapComponent.css'
 import { getPaint } from '@/assets/js/mapModule'
-import { fetchProjectLayers } from '@/api/models'
+import { fetchLatestVersionResultLayers, fetchProjectLayers } from '@/api/models'
 import eventBus from '@/eventBus'
 import SidebarPanel from './SidebarPanel.vue'
 import FeaturePopupTool from '@/utils/showFeaturePopup'
-import { useProjectStore } from '@/stores/projectStore'
 import { useModelStore } from '@/stores/modelStore'
+import { loadWorkspaceState, saveWorkspaceState } from '@/utils/workspaceState'
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || ''
 export default {
@@ -28,7 +28,6 @@ export default {
   components: { SidebarPanel },
   setup() {
     return {
-      projectStore: useProjectStore(),
       engineeringStore: useModelStore(),
     }
   },
@@ -40,8 +39,9 @@ export default {
     featurePopupTool: null,
     loadedLayers: new Set(),
     modelRunCompletedListener: null,
+    workspaceResetListener: null,
     stopVersionWatch: null,
-    stopProjectWatch: null,
+    stopResultVersionWatch: null,
   }),
   mounted() {
     this.mapInstance = new mapboxgl.Map({
@@ -51,11 +51,18 @@ export default {
       zoom: 11,
     })
     this.popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '500px' })
-    this.featurePopupTool = new FeaturePopupTool(this.mapInstance, this.popup, this.projectStore)
+    this.featurePopupTool = new FeaturePopupTool(
+      this.mapInstance,
+      this.popup,
+      this.engineeringStore,
+    )
 
     this.mapInstance.on('load', () => {
       if (this.engineeringStore.selectedVersionId) {
         this.loadInpLayers(this.engineeringStore.selectedVersionId)
+      }
+      if (this.engineeringStore.activeResultVersionId) {
+        this.loadResultLayers(this.engineeringStore.activeResultVersionId)
       }
     })
     this.mapInstance.on('click', this.handleMapClick)
@@ -65,13 +72,20 @@ export default {
       () => this.engineeringStore.selectedVersionId,
       (versionId) => versionId && this.loadInpLayers(versionId),
     )
-    this.stopProjectWatch = this.$watch(
-      () => this.engineeringStore.selectedModelId,
-      (projectId) => projectId && this.projectStore.setProjectId(projectId),
-      { immediate: true },
+    this.stopResultVersionWatch = this.$watch(
+      () => this.engineeringStore.activeResultVersionId,
+      (versionId) => {
+        if (versionId) {
+          if (!this.engineeringStore.running) this.loadResultLayers(versionId)
+        } else {
+          this.removeLayersBySource('simulation')
+        }
+      },
     )
     this.modelRunCompletedListener = (data) => this.handleModelRunCompleted(data)
+    this.workspaceResetListener = () => this.handleWorkspaceReset()
     eventBus.on('modelRunCompleted', this.modelRunCompletedListener)
+    eventBus.on('workspaceReset', this.workspaceResetListener)
   },
   methods: {
     async loadInpLayers(versionId) {
@@ -89,15 +103,36 @@ export default {
             data: layer.geojson,
           })
         })
+        this.restoreLayerPresentation()
         this.fitToProjectLayers(incoming)
       } catch (error) {
         console.error('INP 空间图层加载失败：', error)
       }
     },
 
-    handleModelRunCompleted({ run_id: runId, status, layers, version }) {
+    async loadResultLayers(versionId) {
+      if (!this.mapInstance?.loaded()) return
+      try {
+        const result = await fetchLatestVersionResultLayers(versionId)
+        this.removeLayersBySource('simulation')
+        result.layers.forEach((layer) => this.registerLayer({
+          id: layer.id,
+          name: layer.name,
+          displayName: layer.name,
+          type: layer.geometry_type,
+          source: 'simulation',
+          version: result.version,
+          versionId: result.version_id,
+          data: layer.geojson,
+        }))
+        this.restoreLayerPresentation()
+      } catch (error) {
+        console.error('历史模拟结果图层加载失败：', error)
+      }
+    },
+
+    handleModelRunCompleted({ run_id: runId, status, layers, version, model_version_id: versionId }) {
       if (status !== 'success' || !runId) return
-      this.projectStore.setOutId(runId)
       this.removeLayersBySource('simulation')
       layers.forEach((layer) => this.registerLayer({
         id: layer.id,
@@ -106,15 +141,18 @@ export default {
         type: layer.geometry_type,
         source: 'simulation',
         version,
+        versionId,
         data: layer.geojson,
       }))
+      this.restoreLayerPresentation()
     },
 
     registerLayer(layer) {
       const current = this.layers.findIndex((item) => item.id === layer.id)
       if (current >= 0) this.layers.splice(current, 1, layer)
       else this.layers.unshift(layer)
-      this.layerVisibility[layer.id] = true
+      const savedVisibility = loadWorkspaceState().layerVisibility?.[layer.id]
+      this.layerVisibility[layer.id] = savedVisibility ?? true
       this.addLayerToMap(layer)
     },
 
@@ -131,8 +169,14 @@ export default {
           type: layer.type,
           source: sourceId,
           paint: getPaint(layer.type, layer.source),
-          layout: { visibility: 'visible' },
+          layout: { visibility: this.layerVisibility[layer.id] ? 'visible' : 'none' },
         })
+      } else {
+        this.mapInstance.setLayoutProperty(
+          layerId,
+          'visibility',
+          this.layerVisibility[layer.id] ? 'visible' : 'none',
+        )
       }
       this.loadedLayers.add(layer.id)
     },
@@ -151,6 +195,7 @@ export default {
       if (position === 'after') targetIndex += 1
       this.layers.splice(targetIndex, 0, movedLayer)
       this.syncMapLayerOrder()
+      saveWorkspaceState({ layerOrder: this.layers.map((layer) => layer.id) })
     },
 
     syncMapLayerOrder() {
@@ -160,6 +205,53 @@ export default {
         const mapLayerId = `${layer.id}-layer`
         if (this.mapInstance.getLayer(mapLayerId)) this.mapInstance.moveLayer(mapLayerId)
       })
+    },
+
+    restoreLayerPresentation() {
+      const state = loadWorkspaceState()
+      const savedOrder = state.layerOrder || []
+      const defaultOrder = [
+        'result-nodes',
+        'result-conduits',
+        'result-subcatchments',
+        'inp-nodes',
+        'inp-conduits',
+        'inp-subcatchments',
+      ]
+      const newResultLayers = defaultOrder.filter(
+        (id) => id.startsWith('result-') && !savedOrder.includes(id),
+      )
+      const order = [...newResultLayers, ...savedOrder]
+      const positions = new Map(order.map((id, index) => [id, index]))
+      this.layers.sort((left, right) => {
+        const leftPosition = positions.get(left.id)
+        const rightPosition = positions.get(right.id)
+        if (leftPosition === undefined && rightPosition === undefined) return 0
+        if (leftPosition === undefined) return 1
+        if (rightPosition === undefined) return -1
+        return leftPosition - rightPosition
+      })
+      this.layers.forEach((layer) => {
+        const visible = state.layerVisibility?.[layer.id]
+        if (visible !== undefined) this.toggleLayerVisibility(layer.id, visible, false)
+      })
+      this.syncMapLayerOrder()
+    },
+
+    async handleWorkspaceReset() {
+      this.featurePopupTool?.closePopup()
+      this.removeLayersBySource('simulation')
+      Object.keys(this.layerVisibility).forEach((layerId) => {
+        this.toggleLayerVisibility(layerId, true, false)
+      })
+      const defaultOrder = ['inp-nodes', 'inp-conduits', 'inp-subcatchments']
+      this.layers.sort(
+        (left, right) => defaultOrder.indexOf(left.id) - defaultOrder.indexOf(right.id),
+      )
+      this.syncMapLayerOrder()
+      if (this.engineeringStore.selectedVersionId) {
+        await this.loadInpLayers(this.engineeringStore.selectedVersionId)
+      }
     },
 
     removeLayersBySource(source) {
@@ -222,18 +314,22 @@ export default {
       this.mapInstance.getCanvas().style.cursor = features.length ? 'pointer' : ''
     },
 
-    toggleLayerVisibility(layerId, visible) {
+    toggleLayerVisibility(layerId, visible, persist = true) {
       this.layerVisibility[layerId] = visible
       const mapLayerId = `${layerId}-layer`
       if (this.mapInstance?.getLayer(mapLayerId)) {
         this.mapInstance.setLayoutProperty(mapLayerId, 'visibility', visible ? 'visible' : 'none')
       }
+      if (persist) {
+        saveWorkspaceState({ layerVisibility: { ...this.layerVisibility } })
+      }
     },
   },
   beforeUnmount() {
     if (this.modelRunCompletedListener) eventBus.off('modelRunCompleted', this.modelRunCompletedListener)
+    if (this.workspaceResetListener) eventBus.off('workspaceReset', this.workspaceResetListener)
     this.stopVersionWatch?.()
-    this.stopProjectWatch?.()
+    this.stopResultVersionWatch?.()
     this.mapInstance?.remove()
   },
 }

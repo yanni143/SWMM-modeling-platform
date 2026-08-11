@@ -1,15 +1,14 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from minio.error import S3Error
 from sqlalchemy.orm import Session
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 from database.session import get_db
 from schemas.model import GeoJsonLayer
-from schemas.run import RunResponse
+from schemas.run import ModelResultSummary, RunResponse, VersionResultLayers
 from Service.SimulationService import SimulationRunError, SimulationService
-
 
 router = APIRouter(prefix="/api", tags=["runs"])
 
@@ -29,9 +28,64 @@ def run_version(version_id: UUID, session: Session = Depends(get_db)) -> RunResp
         run, layers = service.run_version(session, version_id)
         return RunResponse(
             run_id=run.id,
+            model_version_id=run.model_version_id,
+            version=run.model_version.version,
             status=run.status,
             layers=[GeoJsonLayer.model_validate(layer) for layer in layers],
             artifacts=service.artifact_payload(run),
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/model-results", response_model=list[ModelResultSummary])
+def list_model_results(session: Session = Depends(get_db)) -> list[ModelResultSummary]:
+    try:
+        return [
+            ModelResultSummary(
+                version_id=version.id,
+                version=version.version,
+                effective_run_id=run.id,
+                created_at=run.created_at,
+                finished_at=run.finished_at,
+            )
+            for run, version in SimulationService().list_latest_successful_results(session)
+        ]
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get(
+    "/model-versions/{version_id}/latest-result/layers",
+    response_model=VersionResultLayers,
+)
+def get_latest_version_layers(
+    version_id: UUID, session: Session = Depends(get_db)
+) -> VersionResultLayers:
+    try:
+        run, version, layers = SimulationService().get_latest_version_layers(session, version_id)
+        return VersionResultLayers(
+            version_id=version.id,
+            version=version.version,
+            effective_run_id=run.id,
+            created_at=run.created_at,
+            finished_at=run.finished_at,
+            layers=[GeoJsonLayer.model_validate(layer) for layer in layers],
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/model-versions/{version_id}/latest-result/timeseries")
+def get_latest_version_timeseries(
+    version_id: UUID,
+    layer_id: str = Query(min_length=1, max_length=100),
+    feature_name: str = Query(min_length=1, max_length=200),
+    session: Session = Depends(get_db),
+) -> dict:
+    try:
+        return SimulationService().get_latest_version_timeseries(
+            session, version_id, layer_id, feature_name
         )
     except Exception as exc:
         raise _translate(exc) from exc

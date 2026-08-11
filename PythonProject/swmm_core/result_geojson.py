@@ -36,6 +36,44 @@ def _feature(geometry: dict, name: str, time_index: int, **values: Any) -> dict:
     }
 
 
+def latest_time_step_layers(layers: list[dict]) -> list[dict]:
+    """Build map layers containing only the final simulation time step.
+
+    The stored visual artifacts intentionally retain every time step because the
+    popup time-series endpoint reads from them.  Map responses use this view to
+    avoid drawing the same geometry repeatedly.
+    """
+    latest_layers: list[dict] = []
+    for layer in layers:
+        geojson = layer.get("geojson", {})
+        features = geojson.get("features", [])
+        time_values = [
+            feature.get("properties", {}).get("time")
+            for feature in features
+            if isinstance(feature.get("properties", {}).get("time"), (int, float))
+        ]
+        latest_time = max(time_values) if time_values else None
+        latest_features = (
+            [
+                feature
+                for feature in features
+                if feature.get("properties", {}).get("time") == latest_time
+            ]
+            if latest_time is not None
+            else list(features)
+        )
+        latest_layers.append(
+            {
+                **layer,
+                "geojson": {
+                    **geojson,
+                    "features": latest_features,
+                },
+            }
+        )
+    return latest_layers
+
+
 def parse_result_layers(inp_path: str | Path, out_path: str | Path) -> list[dict[str, Any]]:
     sections = validate_inp_file(inp_path).sections
     base_layers = build_geojson_layers(
@@ -147,4 +185,3 @@ def write_result_layers(layers: list[dict], directory: str | Path) -> list[Path]
         path.write_text(json.dumps(layer["geojson"], ensure_ascii=False), encoding="utf-8")
         paths.append(path)
     return paths
-

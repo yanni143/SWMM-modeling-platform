@@ -48,8 +48,36 @@
       >
         {{ store.running ? '正在运行并解析结果…' : '运行当前版本' }}
       </button>
-
     </section>
+
+    <section v-if="store.availableResults.length" class="ledger-section">
+      <div class="section-title"><span>历史模拟结果</span><em>每个版本保留最新结果</em></div>
+      <select
+        class="ledger-select"
+        :value="store.activeResultVersionId || ''"
+        :disabled="store.running"
+        aria-label="选择要显示的模拟结果版本"
+        @change="changeResultVersion"
+      >
+        <option value="" disabled>选择一个结果版本</option>
+        <option
+          v-for="result in store.availableResults"
+          :key="result.version_id"
+          :value="result.version_id"
+        >
+          V{{ result.version }} · {{ formatResultTime(result.finished_at || result.created_at) }}
+        </option>
+      </select>
+    </section>
+
+    <button
+      class="reset-action"
+      type="button"
+      :disabled="store.running"
+      @click="restoreInitialState"
+    >
+      恢复初始状态
+    </button>
     <ParameterTuning v-if="store.selectedVersionId && store.parameterGroups.length" />
   </aside>
 </template>
@@ -69,9 +97,28 @@ function changeVersion(event: Event) {
   if (versionId) store.selectVersion(versionId)
 }
 
+function changeResultVersion(event: Event) {
+  const versionId = (event.target as HTMLSelectElement).value
+  if (versionId) store.activateResultVersion(versionId)
+}
+
 async function runCurrentVersion() {
   const result = await store.runSelectedVersion()
   if (result) eventBus.emit('modelRunCompleted', result)
+}
+
+async function restoreInitialState() {
+  await store.restoreInitialState()
+  eventBus.emit('workspaceReset', null)
+}
+
+function formatResultTime(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
 }
 
 function formatBytes(value: number | null) {

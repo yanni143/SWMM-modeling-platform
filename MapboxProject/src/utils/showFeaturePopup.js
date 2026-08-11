@@ -1,8 +1,10 @@
+import { fetchLatestVersionTimeSeries } from '@/api/models'
+
 export default class FeaturePopupTool {
-  constructor(mapInstance, popup, projectStore = null) {
+  constructor(mapInstance, popup, modelStore = null) {
     this.mapInstance = mapInstance
     this.popup = popup
-    this.projectStore = projectStore
+    this.modelStore = modelStore
   }
 
   /**
@@ -11,12 +13,9 @@ export default class FeaturePopupTool {
   showFeaturePopup(feature, lngLat, layer) {
     const layerName = layer.name
     if (layer.source === 'simulation') {
-      // 对模拟结果图层，收集同一位置的时序数据
-      const timeSeriesData = this.collectTimeSeriesData(feature, layer.id)
-      if (timeSeriesData && timeSeriesData.length > 1) {
-        this.showTimeSeriesPopup(feature, lngLat, layerName, timeSeriesData)
-        return
-      }
+      // 地图只保留最后一个时间步，完整时序由结果查询接口加载。
+      this.showTimeSeriesPopup(feature, lngLat, layer)
+      return
     }
 
     // 显示普通属性弹窗
@@ -72,36 +71,12 @@ export default class FeaturePopupTool {
   }
 
   /**
-   * 收集时序数据
-   */
-  collectTimeSeriesData(clickedFeature, layerId) {
-    if (!this.mapInstance) return null
-
-    const sourceId = `${layerId}-source`
-    const source = this.mapInstance.getSource(sourceId)
-    if (!source || !source._data) return null
-
-    const clickedProperties = clickedFeature.properties
-    const featureName = clickedProperties.name
-
-    // 从数据源中取出所有同名要素
-    const allFeatures = source._data.features || []
-    const timeSeriesFeatures = allFeatures.filter(
-      (feature) => feature.properties.name === featureName,
-    )
-
-    // 按时间排序
-    return timeSeriesFeatures.sort((a, b) => a.properties.time - b.properties.time)
-  }
-
-  /**
    * 显示时序数据弹窗
    */
-  showTimeSeriesPopup(feature, lngLat, layerName, timeSeriesData) {
-    const properties = feature.properties
-
+  showTimeSeriesPopup(feature, lngLat, layer) {
+    const latestStepData = [feature]
     // 生成包含图表的弹窗内容
-    const popupContent = this.createTimeSeriesChart(feature, layerName, timeSeriesData)
+    const popupContent = this.createTimeSeriesChart(feature, layer, latestStepData)
 
     if (this.popup) {
       this.popup.remove()
@@ -112,29 +87,42 @@ export default class FeaturePopupTool {
     popupElement.innerHTML = popupContent
     this.popup.setLngLat(lngLat).setDOMContent(popupElement).addTo(this.mapInstance)
 
-    // 等待 DOM 就绪后渲染图表
-    setTimeout(() => {
-      this.renderTimeSeriesChart(feature, layerName, timeSeriesData)
+    // 等待 DOM 就绪后，从专用接口加载完整时序并渲染图表。
+    setTimeout(async () => {
+      const versionId = layer.versionId || this.modelStore?.activeResultVersionId
+      const timeSeriesData = versionId
+        ? await this.fetchTimeSeriesDataByVersion(feature, layer, versionId)
+        : latestStepData
+
+      if (timeSeriesData?.length) {
+        this.renderTimeSeriesChart(feature, layer, timeSeriesData)
+        return
+      }
+
+      const chartContainer = document.getElementById('time-series-chart')
+      if (chartContainer) {
+        chartContainer.innerHTML = '<div style="color: #f56565; text-align: center;">Failed to load data</div>'
+      }
     }, 0)
   }
 
   /**
    * 生成时序图表的 HTML 结构
    */
-  createTimeSeriesChart(feature, layerName, timeSeriesData) {
+  createTimeSeriesChart(feature, layer, timeSeriesData) {
+    const layerName = layer.name
     // 根据图层类型获取参数选项
     const paramOptions = this.getParamOptionsByLayer(layerName, timeSeriesData[0]?.properties)
 
-    // 从 store 中读取当前 out_id 和历史记录
-    const currentOutId = this.projectStore?.currentOutId || 'N/A'
-    const outIdHistory = this.projectStore?.outIdHistory || []
-    
-    // 生成 out_id 选项，倒序显示最新记录
-    const outIdOptions = outIdHistory.length > 0
-      ? [...outIdHistory].reverse().map(outId => 
-          `<option value="${outId}" ${outId === currentOutId ? 'selected' : ''}>${outId}</option>`
-        ).join('')
-      : `<option value="${currentOutId}">${currentOutId}</option>`
+    const currentVersionId = layer.versionId || this.modelStore?.activeResultVersionId
+    const resultVersions = this.modelStore?.availableResults || []
+    const versionOptions = resultVersions
+      .map((result) => `
+        <option value="${result.version_id}" ${result.version_id === currentVersionId ? 'selected' : ''}>
+          V${result.version}
+        </option>
+      `)
+      .join('')
 
     return `
       <div class="time-series-popup" style="max-width: 500px; max-height: 450px; overflow-y: auto;">
@@ -145,13 +133,13 @@ export default class FeaturePopupTool {
           
           <div style="margin: 12px 0;">
             <label style="font-size: 13px; font-weight: bold; margin-bottom: 6px; display: block;">
-              Simulation ID:
+              结果版本：
             </label>
-            <select id="out-id-selector" style="width: 100%; padding: 6px 8px; border: 1px solid #1890ff; border-radius: 4px; font-size: 13px; font-family: monospace; background: #f0f8ff; color: #1890ff; cursor: pointer;">
-              ${outIdOptions}
+            <select id="result-version-selector" style="width: 100%; padding: 6px 8px; border: 1px solid #1890ff; border-radius: 4px; font-size: 13px; font-family: monospace; background: #f0f8ff; color: #1890ff; cursor: pointer;">
+              ${versionOptions}
             </select>
             <div style="font-size: 11px; color: #999; margin-top: 4px;">
-              ${outIdHistory.length > 0 ? `Total ${outIdHistory.length} simulation(s)` : 'Current simulation'}
+              共 ${resultVersions.length} 个有成功结果的版本；同版本仅显示最新结果
             </div>
           </div>
           
@@ -254,10 +242,11 @@ export default class FeaturePopupTool {
   /**
    * 渲染时序图表
    */
-  renderTimeSeriesChart(feature, layerName, timeSeriesData) {
+  renderTimeSeriesChart(feature, layer, timeSeriesData) {
+    const layerName = layer.name
     const chartContainer = document.getElementById('time-series-chart')
     const paramSelect = document.getElementById('time-series-param')
-    const outIdSelect = document.getElementById('out-id-selector')
+    const versionSelect = document.getElementById('result-version-selector')
 
     if (!chartContainer || !paramSelect) return
 
@@ -266,33 +255,37 @@ export default class FeaturePopupTool {
     this.currentLayerName = layerName
 
     // 初次渲染
-    this.updateTimeSeriesChart(chartContainer, timeSeriesData, paramSelect.value)
+    let displayedTimeSeriesData = timeSeriesData
+    this.updateTimeSeriesChart(chartContainer, displayedTimeSeriesData, paramSelect.value)
+    const dataPointsInfo = document.getElementById('data-points-info')
+    if (dataPointsInfo) {
+      dataPointsInfo.textContent = `Number of data points: ${displayedTimeSeriesData.length}`
+    }
 
     // 监听参数切换
     paramSelect.addEventListener('change', () => {
-      this.updateTimeSeriesChart(chartContainer, timeSeriesData, paramSelect.value)
+      this.updateTimeSeriesChart(chartContainer, displayedTimeSeriesData, paramSelect.value)
     })
 
-    // 监听 out_id 切换
-    if (outIdSelect) {
-      outIdSelect.addEventListener('change', async () => {
-        const selectedOutId = outIdSelect.value
-        console.log('Switching to out_id:', selectedOutId)
-        
+    // 按版本查询该版本最新一次成功运行的结果
+    if (versionSelect) {
+      versionSelect.addEventListener('change', async () => {
+        const selectedVersionId = versionSelect.value
+
         // 显示加载状态
         chartContainer.innerHTML = '<div style="color: #666; text-align: center;">Loading data...</div>'
         
         try {
-          // 根据选中的 out_id 拉取新的时序数据
-          const newTimeSeriesData = await this.fetchTimeSeriesDataByOutId(
+          const newTimeSeriesData = await this.fetchTimeSeriesDataByVersion(
             feature,
-            layerName,
-            selectedOutId
+            layer,
+            selectedVersionId,
           )
           
           if (newTimeSeriesData && newTimeSeriesData.length > 0) {
+            displayedTimeSeriesData = newTimeSeriesData
             // 用新数据更新图表
-            this.updateTimeSeriesChart(chartContainer, newTimeSeriesData, paramSelect.value)
+            this.updateTimeSeriesChart(chartContainer, displayedTimeSeriesData, paramSelect.value)
             
             // 更新数据点数量信息
             const dataPointsInfo = document.getElementById('data-points-info')
@@ -310,62 +303,13 @@ export default class FeaturePopupTool {
     }
   }
 
-  /**
-   * 根据指定 out_id 获取时序数据
-   */
-  async fetchTimeSeriesDataByOutId(feature, layerName, outId) {
-    if (!this.projectStore) {
-      console.error('ProjectStore is not available')
-      return null
-    }
-
-    const projectId = this.projectStore.currentProjectId
-    if (!projectId) {
-      console.error('Project ID is not available')
-      return null
-    }
-
-    // 根据图层名称确定文件名
-    const filenameMap = {
-      '管点模拟结果': 'out_nodes.json',
-      '节点模拟结果': 'out_nodes.json',
-      '管段模拟结果': 'out_links.json',
-      '管线模拟结果': 'out_links.json',
-      '子汇水区模拟结果': 'out_subcatchments.json',
-    }
-
-    const filename = filenameMap[layerName]
-    if (!filename) {
-      console.error('Unknown layer name:', layerName)
-      return null
-    }
-
+  async fetchTimeSeriesDataByVersion(feature, layer, versionId) {
     try {
-      // 拼接接口地址
-      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
-      const params = new URLSearchParams({ project_id: projectId, out_id: outId, filename })
-      const apiUrl = `${apiBaseUrl}/get_simulation_result?${params}`
-      console.log('Fetching data from:', apiUrl)
-
-      const response = await fetch(apiUrl)
-      if (!response.ok) {
-        console.error('Failed to fetch data:', response.status)
-        return null
-      }
-
-      const data = await response.json()
-      
-      // 过滤出与当前点击要素同名的要素
       const featureName = feature.properties.name
-      const allFeatures = data.features || []
-      const timeSeriesFeatures = allFeatures.filter(
-        (f) => f.properties.name === featureName
-      )
-
-      // 按时间排序
-      return timeSeriesFeatures.sort((a, b) => a.properties.time - b.properties.time)
+      const data = await fetchLatestVersionTimeSeries(versionId, layer.id, featureName)
+      return (data.features || []).sort((a, b) => a.properties.time - b.properties.time)
     } catch (error) {
-      console.error('Error fetching time series data:', error)
+      console.error('Error fetching version time series data:', error)
       return null
     }
   }
