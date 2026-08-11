@@ -1,9 +1,9 @@
 .tuning-workspace { margin-top: 22px; padding-top: 15px; border-top: 2px solid #23748c; }
 .tuning-heading, .change-ruler-title, .object-identity, .version-created { display: flex; align-items: center; justify-content: space-between; }
 .tuning-heading small, .version-created small { color: #23748c; font: 9px Consolas, monospace; letter-spacing: .14em; }
-.tuning-heading h3 { margin: 2px 0 0; font-size: 17px; }
-.tuning-heading > span { padding: 5px 7px; color: #23748c; border: 1px solid rgba(35,116,140,.35); font: 10px Consolas, monospace; }
-.tuning-guidance { margin: 10px 0 12px; color: #687b82; font-size: 11px; line-height: 1.5; }
+.tuning-heading h3 { margin: 2px 0 0; font-size: 14px; }
+.tuning-heading > span { padding: 5px 7px; color: #23748c; border: 1px solid rgba(35,116,140,.35); font: 12px Consolas, monospace; }
+.tuning-guidance { margin: 10px 0 12px; color: #687b82; font-size: 12px; line-height: 1.5; }
 .selection-mode { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 8px; border: 1px solid rgba(16,42,55,.18); }
 .selection-mode button { min-height: 32px; color: #607178; border: 0; background: rgba(255,255,255,.68); font: 600 10px inherit; cursor: pointer; }
 .selection-mode button + button { border-left: 1px solid rgba(16,42,55,.18); }
@@ -12,16 +12,16 @@
 .group-tabs { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: rgba(16,42,55,.15); border: 1px solid rgba(16,42,55,.15); }
 .group-tabs button { padding: 9px 5px; color: #53676e; border: 0; background: rgba(255,255,255,.78); font: 600 11px inherit; cursor: pointer; }
 .group-tabs button.active { color: white; background: #23748c; }
-.group-tabs b { margin-left: 3px; font: 9px Consolas,monospace; }
+.group-tabs b { margin-left: 3px; font: 11px Consolas,monospace; }
 .object-picker { display: grid; grid-template-columns: 1fr 1.25fr; gap: 8px; margin-top: 10px; }
 .object-picker input, .object-picker select, .change-ruler > input { box-sizing: border-box; width: 100%; padding: 8px; border: 1px solid #bdc9c9; border-radius: 0; background: rgba(255,255,255,.78); font: 11px inherit; outline: none; }
 .object-picker select { min-height: 104px; }
 .object-picker input:focus, .object-picker select:focus, .field-grid input:focus { border-color: #23748c; box-shadow: 0 0 0 2px rgba(35,116,140,.1); }
 .object-editor { margin-top: 10px; border: 1px solid rgba(16,42,55,.17); background: rgba(255,255,255,.56); }
 .object-identity { padding: 10px 12px; border-bottom: 1px solid rgba(16,42,55,.12); }
-.object-identity span { color: #718086; font-size: 9px; }
+.object-identity span { color: #718086; font-size: 12px; }
 .object-identity strong { font: 650 12px Consolas,monospace; }
-.object-identity em { color: #718086; font-size: 9px; font-style: normal; }
+.object-identity em { color: #718086; font-size: 12px; font-style: normal; }
 .batch-object-list { height: 132px; overflow-y: auto; border: 1px solid #bdc9c9; background: rgba(255,255,255,.78); }
 .batch-list-actions { position: sticky; z-index: 1; top: 0; display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid rgba(16,42,55,.1); background: #edf3f2; }
 .batch-list-actions button { padding: 0; color: #23748c; border: 0; background: none; font: 9px inherit; cursor: pointer; }
@@ -31,20 +31,20 @@
 .batch-object-list > p { padding: 12px; color: #718086; font-size: 9px; text-align: center; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(16,42,55,.1); }
 .field-grid label { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.8); }
-.field-grid label > span { font-size: 10px; font-weight: 650; }
-.field-grid label > span small { color: #23748c; font-weight: 400; }
-.field-grid input { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid #c4cece; background: #fff; font: 11px Consolas,monospace; outline: none; }
-.field-grid label > small { color: #849094; font-size: 8px; }
+.field-grid label > span { font-size: 12px; font-weight: 650; }
+.field-grid label > span small { color: #000000; font-weight: 400; }
+.field-grid input { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid #c4cece; background: #fff; font: 12px Consolas,monospace; outline: none; }
+.field-grid label > small { color: #849094; font-size: 11px; }
 .batch-editor { margin-top: 10px; padding: 11px; border: 1px solid rgba(35,116,140,.32); background: #e7f0ef; }
 .batch-editor-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 9px; }
 .batch-editor-heading > div { display: grid; gap: 2px; }
-.batch-editor-heading small { color: #23748c; font: 8px Consolas,monospace; letter-spacing: .12em; }
-.batch-editor-heading strong { font-size: 11px; }
-.batch-editor-heading > span { color: #718086; font-size: 8px; }
+.batch-editor-heading small { color: #23748c; font: 12px Consolas,monospace; letter-spacing: .12em; }
+.batch-editor-heading strong { font-size: 13px; }
+.batch-editor-heading > span { color: #718086; font-size: 12px; }
 .batch-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .batch-controls label { display: grid; gap: 4px; }
-.batch-controls label > span { font-size: 9px; font-weight: 650; }
-.batch-controls select, .batch-controls input { box-sizing: border-box; width: 100%; min-height: 31px; padding: 6px; border: 1px solid #b7c5c4; border-radius: 0; background: white; font: 10px inherit; outline: none; }
+.batch-controls label > span { font-size: 12px; font-weight: 650; }
+.batch-controls select, .batch-controls input { box-sizing: border-box; width: 100%; min-height: 31px; padding: 6px; border: 1px solid #b7c5c4; border-radius: 0; background: white; font: 12px inherit; outline: none; }
 .batch-value-input { position: relative; }
 .batch-value-input input { padding-right: 36px; }
 .batch-value-input small { position: absolute; top: 9px; right: 8px; color: #718086; font: 8px Consolas,monospace; }

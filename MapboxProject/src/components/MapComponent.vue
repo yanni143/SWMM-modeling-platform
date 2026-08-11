@@ -4,6 +4,7 @@
       :layers="layers"
       :layer-visibility="layerVisibility"
       @layer-visibility-change="toggleLayerVisibility"
+      @layer-order-change="reorderLayer"
     />
     <div id="map" class="map-container"></div>
   </div>
@@ -94,7 +95,7 @@ export default {
       }
     },
 
-    handleModelRunCompleted({ run_id: runId, status, layers }) {
+    handleModelRunCompleted({ run_id: runId, status, layers, version }) {
       if (status !== 'success' || !runId) return
       this.projectStore.setOutId(runId)
       this.removeLayersBySource('simulation')
@@ -104,6 +105,7 @@ export default {
         displayName: layer.name,
         type: layer.geometry_type,
         source: 'simulation',
+        version,
         data: layer.geojson,
       }))
     },
@@ -111,7 +113,7 @@ export default {
     registerLayer(layer) {
       const current = this.layers.findIndex((item) => item.id === layer.id)
       if (current >= 0) this.layers.splice(current, 1, layer)
-      else this.layers.push(layer)
+      else this.layers.unshift(layer)
       this.layerVisibility[layer.id] = true
       this.addLayerToMap(layer)
     },
@@ -133,6 +135,31 @@ export default {
         })
       }
       this.loadedLayers.add(layer.id)
+    },
+
+    reorderLayer({ draggedId, targetId, position }) {
+      if (draggedId === targetId) return
+      const sourceIndex = this.layers.findIndex((layer) => layer.id === draggedId)
+      if (sourceIndex < 0) return
+
+      const [movedLayer] = this.layers.splice(sourceIndex, 1)
+      let targetIndex = this.layers.findIndex((layer) => layer.id === targetId)
+      if (targetIndex < 0) {
+        this.layers.splice(sourceIndex, 0, movedLayer)
+        return
+      }
+      if (position === 'after') targetIndex += 1
+      this.layers.splice(targetIndex, 0, movedLayer)
+      this.syncMapLayerOrder()
+    },
+
+    syncMapLayerOrder() {
+      if (!this.mapInstance?.loaded()) return
+      // The panel is top-first; Mapbox's style stack is bottom-first.
+      this.layers.slice().reverse().forEach((layer) => {
+        const mapLayerId = `${layer.id}-layer`
+        if (this.mapInstance.getLayer(mapLayerId)) this.mapInstance.moveLayer(mapLayerId)
+      })
     },
 
     removeLayersBySource(source) {

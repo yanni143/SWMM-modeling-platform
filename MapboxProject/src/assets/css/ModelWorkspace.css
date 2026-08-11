@@ -35,7 +35,7 @@
 .workspace-kicker {
   margin: 0 0 4px;
   color: var(--water);
-  font: 600 10px/1.2 Consolas, monospace;
+  font: 600 12px/1.2 Consolas, monospace;
   letter-spacing: 0.16em;
 }
 
@@ -48,7 +48,7 @@
 
 .system-state {
   color: #32604e;
-  font: 600 10px/1 Consolas, monospace;
+  font: 600 12px/1 Consolas, monospace;
 }
 
 .system-state i {
@@ -87,7 +87,7 @@
   padding: 0 5px;
   color: #7c898d;
   background: var(--paper);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .process-rail span {
@@ -98,14 +98,14 @@
   border: 1px solid #98a5a8;
   border-radius: 50%;
   background: var(--paper);
-  font: 9px Consolas, monospace;
+  font: 12px Consolas, monospace;
 }
 
 .process-rail li.active { color: var(--ink); }
 .process-rail li.active span { color: white; border-color: var(--water); background: var(--water); }
 
-.section-title { font-size: 12px; font-weight: 650; letter-spacing: 0.04em; }
-.section-title em { color: #748287; font-size: 10px; font-style: normal; font-weight: 400; }
+.section-title { font-size: 14px; font-weight: 650; letter-spacing: 0.04em; }
+.section-title em { color: #748287; font-size: 12px; font-style: normal; font-weight: 400; }
 
 .ledger-select {
   box-sizing: border-box;
@@ -157,8 +157,8 @@
 .model-facts div:last-child { border-right: 0; }
 .model-facts span,
 .model-facts strong { display: block; }
-.model-facts span { margin-bottom: 3px; color: #718086; font-size: 9px; text-transform: uppercase; }
-.model-facts strong { font-size: 11px; font-weight: 600; }
+.model-facts span { margin-bottom: 3px; color: #718086; font-size: 12px; text-transform: uppercase; }
+.model-facts strong { font-size: 12px; font-weight: 600; }
 
 .section-index { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
 .section-index button {

@@ -4,6 +4,7 @@
       :layers="layers"
       :layer-visibility="layerVisibility"
       @layer-visibility-change="(id, visible) => $emit('layer-visibility-change', id, visible)"
+      @layer-order-change="(change) => $emit('layer-order-change', change)"
     />
   </div>
 </template>
@@ -18,7 +19,7 @@ export default {
     layers: { type: Array, required: true },
     layerVisibility: { type: Object, required: true },
   },
-  emits: ['layer-visibility-change'],
+  emits: ['layer-visibility-change', 'layer-order-change'],
 }
 </script>
 

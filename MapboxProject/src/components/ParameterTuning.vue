@@ -2,7 +2,6 @@
   <section class="tuning-workspace" aria-label="参数调整">
     <div class="tuning-heading">
       <div>
-        <small>SAFE PARAMETER SET</small>
         <h3>常用参数调整</h3>
       </div>
       <span>{{ draftsList.length }} 项待保存</span>
@@ -80,10 +79,8 @@
     <div v-if="selectionMode === 'batch' && selectedTargets.length" class="batch-editor">
       <div class="batch-editor-heading">
         <div>
-          <small>BATCH OPERATION</small>
           <strong>已选择 {{ selectedTargets.length }} 个{{ activeGroup?.label }}</strong>
         </div>
-        <span>{{ filteredSelectedCount }} 个在当前搜索结果中</span>
       </div>
       <div v-if="commonFields.length" class="batch-controls">
         <label>

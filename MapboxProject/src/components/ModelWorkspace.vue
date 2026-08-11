@@ -21,7 +21,6 @@
         <span>固定研究区</span>
         <button type="button" @click="store.loadModels()">刷新</button>
       </div>
-      <p>{{ store.selectedModel.description || '系统内置 SWMM 模型' }}</p>
       <div class="model-facts">
         <div><span>状态</span><strong>已就绪</strong></div>
         <div><span>版本数</span><strong>{{ store.selectedModel.version_count }}</strong></div>

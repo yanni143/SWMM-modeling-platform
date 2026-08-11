@@ -112,11 +112,13 @@ export const useModelStore = defineStore('model-library', {
       }
     },
     async runSelectedVersion() {
-      if (!this.selectedVersionId) return null
+      const version = this.selectedVersion
+      if (!version) return null
       this.running = true
       this.error = null
       try {
-        return await runProjectVersion(this.selectedVersionId)
+        const result = await runProjectVersion(version.id)
+        return { ...result, version: version.version, versionId: version.id }
       } catch (error) {
         this.error = error instanceof Error ? error.message : '工程运行失败'
         return null

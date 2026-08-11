@@ -1,25 +1,45 @@
 <template>
   <section class="layer-control" :class="{ collapsed: isCollapsed }" aria-label="工程图层">
     <button class="layer-top" type="button" :aria-expanded="!isCollapsed" @click="toggleCollapse">
-      <span>
-        <small>MAP CONTENT</small>
-        工程图层
-      </span>
-      <b>{{ layers.length }}</b>
+      <span>工程图层</span>
       <i aria-hidden="true">{{ isCollapsed ? '+' : '−' }}</i>
     </button>
 
     <div v-show="!isCollapsed" class="layer-list">
-      <label v-for="layer in layers" :key="layer.id" class="layer-item">
+      <div
+        v-for="layer in layers"
+        :key="layer.id"
+        class="layer-item"
+        :class="{
+          dragging: draggedLayerId === layer.id,
+          'drop-before': dragOverLayerId === layer.id && dropPosition === 'before',
+          'drop-after': dragOverLayerId === layer.id && dropPosition === 'after',
+        }"
+        @dragover.prevent="handleDragOver(layer.id, $event)"
+        @drop.prevent="handleDrop(layer.id)"
+      >
+        <span
+          class="drag-handle"
+          draggable="true"
+          tabindex="0"
+          role="button"
+          :aria-label="`拖动${layer.displayName || layer.name}调整压盖顺序`"
+          title="拖动调整图层压盖顺序"
+          @dragstart="handleDragStart(layer.id, $event)"
+          @dragend="resetDragState"
+          @keydown.up.prevent="moveLayerByKeyboard(layer.id, -1)"
+          @keydown.down.prevent="moveLayerByKeyboard(layer.id, 1)"
+        >⠿</span>
         <input
           type="checkbox"
           :checked="layerVisibility[layer.id]"
+          :aria-label="`${layer.displayName || layer.name}可见性`"
           @change="handleLayerChange(layer.id, $event)"
         />
         <span class="layer-swatch" :data-geometry="layer.type"></span>
         <span class="layer-name">{{ layer.displayName || layer.name }}</span>
-        <small>{{ layer.source === 'inp' ? 'INP' : 'RUN' }}</small>
-      </label>
+        <small>{{ layer.source === 'inp' ? 'INP' : `V${layer.version ?? '—'}·RUN` }}</small>
+      </div>
 
       <div v-if="layers.length === 0" class="no-layers">
         <span aria-hidden="true">⌁</span>
@@ -39,13 +59,60 @@ export default {
     layers: { type: Array, required: true },
     layerVisibility: { type: Object, required: true },
   },
-  data: () => ({ isCollapsed: false }),
+  emits: ['layer-visibility-change', 'layer-order-change'],
+  data: () => ({
+    isCollapsed: false,
+    draggedLayerId: null,
+    dragOverLayerId: null,
+    dropPosition: null,
+  }),
   methods: {
     handleLayerChange(layerId, event) {
       this.$emit('layer-visibility-change', layerId, event.target.checked)
     },
     toggleCollapse() {
       this.isCollapsed = !this.isCollapsed
+    },
+    handleDragStart(layerId, event) {
+      this.draggedLayerId = layerId
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('text/plain', layerId)
+    },
+    handleDragOver(layerId, event) {
+      if (!this.draggedLayerId || this.draggedLayerId === layerId) {
+        this.dragOverLayerId = null
+        this.dropPosition = null
+        return
+      }
+      const bounds = event.currentTarget.getBoundingClientRect()
+      this.dragOverLayerId = layerId
+      this.dropPosition = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after'
+      event.dataTransfer.dropEffect = 'move'
+    },
+    handleDrop(targetId) {
+      if (this.draggedLayerId && this.dragOverLayerId === targetId && this.dropPosition) {
+        this.$emit('layer-order-change', {
+          draggedId: this.draggedLayerId,
+          targetId,
+          position: this.dropPosition,
+        })
+      }
+      this.resetDragState()
+    },
+    moveLayerByKeyboard(layerId, offset) {
+      const currentIndex = this.layers.findIndex((layer) => layer.id === layerId)
+      const target = this.layers[currentIndex + offset]
+      if (!target) return
+      this.$emit('layer-order-change', {
+        draggedId: layerId,
+        targetId: target.id,
+        position: offset < 0 ? 'before' : 'after',
+      })
+    },
+    resetDragState() {
+      this.draggedLayerId = null
+      this.dragOverLayerId = null
+      this.dropPosition = null
     },
   },
 }
