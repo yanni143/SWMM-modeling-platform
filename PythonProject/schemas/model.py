@@ -65,9 +65,3 @@ class GeoJsonLayer(BaseModel):
 class VersionLayersResponse(BaseModel):
     version_id: UUID
     layers: list[GeoJsonLayer]
-
-
-class DownloadUrlResponse(BaseModel):
-    version_id: UUID
-    expires_seconds: int
-    url: str

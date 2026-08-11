@@ -12,7 +12,6 @@ from storage.minio_client import (
     download_file,
     ensure_bucket,
     get_minio_client,
-    presigned_get,
     upload_file,
 )
 
@@ -116,19 +115,6 @@ class ArtifactStorageService:
         download_file(self.client, bucket or self.bucket, object_key, str(path))
         return path
 
-    def presigned_url(
-        self,
-        object_key: str,
-        expires_seconds: Optional[int] = None,
-        bucket: Optional[str] = None,
-    ) -> str:
-        return presigned_get(
-            self.client,
-            bucket or self.bucket,
-            object_key,
-            expires_seconds or self.settings.presigned_url_expires_seconds,
-        )
-
     def delete(self, object_key: str) -> None:
         self.client.remove_object(self.bucket, object_key)
 
@@ -143,7 +129,9 @@ class ArtifactStorageService:
             raise FileNotFoundError(f"待上传文件不存在：{path}")
 
         self.initialize()
-        detected_type = content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        detected_type = (
+            content_type or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        )
         metadata = upload_file(
             self.client,
             self.bucket,

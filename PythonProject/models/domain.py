@@ -52,7 +52,10 @@ class ModelVersion(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     model_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("swmm_models.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("swmm_models.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     parent_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("model_versions.id", ondelete="SET NULL")
@@ -78,7 +81,10 @@ class ModelParameterChange(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("model_versions.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("model_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     operation: Mapped[str] = mapped_column(String(20), nullable=False)
     section: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -101,10 +107,16 @@ class SimulationRun(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     model_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("swmm_models.id", ondelete="RESTRICT"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("swmm_models.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     model_version_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("model_versions.id", ondelete="RESTRICT"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("model_versions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -128,7 +140,10 @@ class RunArtifact(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     run_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("simulation_runs.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("simulation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     artifact_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     bucket: Mapped[str] = mapped_column(String(100), nullable=False)

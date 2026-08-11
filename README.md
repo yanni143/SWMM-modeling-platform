@@ -5,7 +5,7 @@
 ## 目录
 
 - `MapboxProject/`：Vue 3、Vite、Mapbox GL 前端。
-- `PythonProject/`：FastAPI、PySWMM、PostgreSQL/PostGIS、MinIO 后端。
+- `PythonProject/`：FastAPI、PySWMM、PostgreSQL、MinIO 后端。
 
 ## 后端开发
 
@@ -60,13 +60,13 @@ npm install
 npm run dev
 ```
 
-可通过 `VITE_API_BASE_URL` 配置后端地址，开发环境默认使用 `http://localhost:8000`。
+开发服务器会把 `/api` 和 `/health` 代理到 `http://localhost:8000`；生产环境由 Caddy 同源代理。
 
 ## 腾讯云生产部署
 
 仓库提供了一套适用于 Ubuntu 24.04 的 Docker Compose 部署配置：
 
-- `compose.prod.yaml`：PostgreSQL/PostGIS、MinIO、FastAPI 和 Caddy/Vue。
+- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Caddy/Vue。
 - `.env.production.example`：生产环境变量模板。
 - `deploy/server-bootstrap.sh`：服务器初始化和 Docker 权限配置。
 - `deploy/generate-env.sh`：生成随机数据库与 MinIO 密码。

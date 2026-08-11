@@ -1,42 +1,22 @@
-# MapboxProject
+# SWMM 地图前端
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3、Vite、Pinia 与 Mapbox GL 构建的固定研究区建模界面。
 
-## Recommended IDE Setup
+## 本地开发
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+复制 `.env.example` 为 `.env`，填写 Mapbox 公开 Token，然后执行：
 
-## Recommended Browser Setup
-
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd) 
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
-
-```sh
-npm install
-```
-
-### Compile and Hot-Reload for Development
-
-```sh
+```bash
+npm ci
 npm run dev
 ```
 
-### Type-Check, Compile and Minify for Production
+Vite 会将 `/api` 和 `/health` 代理到本机 `http://localhost:8000`。
 
-```sh
+## 生产构建
+
+```bash
 npm run build
 ```
+
+完整生产部署使用仓库根目录的 `compose.prod.yaml` 和 `deploy/README.md`。

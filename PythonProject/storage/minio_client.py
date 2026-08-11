@@ -1,4 +1,3 @@
-from datetime import timedelta
 import os
 from typing import Optional, Dict, Any
 from minio import Minio
@@ -57,10 +56,6 @@ def download_file(client: Minio, bucket: str, object_key: str, local_path: str) 
     # Ensure destination directory exists
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     client.fget_object(bucket, object_key, local_path)
-
-
-def presigned_get(client: Minio, bucket: str, object_key: str, expires_seconds: int = 3600) -> str:
-    return client.presigned_get_object(bucket, object_key, expires=timedelta(seconds=expires_seconds))
 
 
 def stat_object(client: Minio, bucket: str, object_key: str) -> Dict[str, Any]:

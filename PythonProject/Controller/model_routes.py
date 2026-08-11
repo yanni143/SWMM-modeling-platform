@@ -8,7 +8,6 @@ from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
 from database.session import get_db
 from schemas.model import (
-    DownloadUrlResponse,
     ModelListItem,
     ModelRead,
     ModelVersionRead,
@@ -147,24 +146,6 @@ def create_adjusted_version(
         return CreateAdjustedVersionResponse(
             version=ModelVersionRead.model_validate(version),
             changes=[AppliedParameterChange.model_validate(change) for change in changes],
-        )
-    except Exception as exc:
-        raise translate_service_error(exc) from exc
-
-
-@router.get(
-    "/model-versions/{version_id}/download-url",
-    response_model=DownloadUrlResponse,
-)
-def get_version_download_url(
-    version_id: UUID, session: Session = Depends(get_db)
-) -> DownloadUrlResponse:
-    try:
-        ModelService().get_version(session, version_id)
-        return DownloadUrlResponse(
-            version_id=version_id,
-            expires_seconds=0,
-            url=f"/api/model-versions/{version_id}/download",
         )
     except Exception as exc:
         raise translate_service_error(exc) from exc

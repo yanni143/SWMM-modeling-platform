@@ -19,9 +19,7 @@ class Settings(BaseSettings):
 
     app_name: str = "SWMM Modeling and Simulation API"
     app_env: str = "development"
-    cors_origins: str = (
-        "http://localhost:5173,http://223.2.33.21,http://223.2.33.21:5173"
-    )
+    cors_origins: str = "http://localhost:5173"
 
     database_url: str = Field(
         validation_alias=AliasChoices("DATABASE_URL", "DB_URL_NEW", "PG_DSN")
@@ -40,7 +38,6 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minioadmin"
     minio_secure: bool = False
     minio_bucket: str = "swmm-artifacts"
-    presigned_url_expires_seconds: int = 3600
     minio_connect_timeout_seconds: float = 2.0
     minio_read_timeout_seconds: float = 10.0
 

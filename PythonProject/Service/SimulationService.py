@@ -64,8 +64,12 @@ class SimulationService:
             with tempfile.TemporaryDirectory(prefix=f"run-{run.id}-", dir=runtime) as directory:
                 workdir = Path(directory)
                 inp_path = workdir / "model.inp"
-                self.storage.download_to(version.inp_object_key, inp_path, bucket=version.inp_bucket)
-                self._record_artifact(session, run, "input", self.storage.upload_run_input(inp_path, run.id))
+                self.storage.download_to(
+                    version.inp_object_key, inp_path, bucket=version.inp_bucket
+                )
+                self._record_artifact(
+                    session, run, "input", self.storage.upload_run_input(inp_path, run.id)
+                )
                 run.progress = 20
                 session.commit()
 
@@ -81,15 +85,24 @@ class SimulationService:
                 session.commit()
 
                 self._record_artifact(
-                    session, run, "raw_out", self.storage.upload_run_artifact(out_path, run.id, "raw")
+                    session,
+                    run,
+                    "raw_out",
+                    self.storage.upload_run_artifact(out_path, run.id, "raw"),
                 )
                 if rpt_path.is_file():
                     self._record_artifact(
-                        session, run, "report", self.storage.upload_run_artifact(rpt_path, run.id, "raw")
+                        session,
+                        run,
+                        "report",
+                        self.storage.upload_run_artifact(rpt_path, run.id, "raw"),
                     )
                 for path in visual_paths:
                     self._record_artifact(
-                        session, run, "visual", self.storage.upload_run_artifact(path, run.id, "visual")
+                        session,
+                        run,
+                        "visual",
+                        self.storage.upload_run_artifact(path, run.id, "visual"),
                     )
 
             run.status = "success"
@@ -119,14 +132,18 @@ class SimulationService:
     def list_latest_successful_results(
         self, session: Session
     ) -> list[tuple[SimulationRun, ModelVersion]]:
-        rank = func.row_number().over(
-            partition_by=SimulationRun.model_version_id,
-            order_by=(
-                SimulationRun.started_at.desc(),
-                SimulationRun.created_at.desc(),
-                SimulationRun.id.desc(),
-            ),
-        ).label("result_rank")
+        rank = (
+            func.row_number()
+            .over(
+                partition_by=SimulationRun.model_version_id,
+                order_by=(
+                    SimulationRun.started_at.desc(),
+                    SimulationRun.created_at.desc(),
+                    SimulationRun.id.desc(),
+                ),
+            )
+            .label("result_rank")
+        )
         ranked = (
             select(SimulationRun.id.label("run_id"), rank)
             .where(
@@ -217,9 +234,7 @@ class SimulationService:
         features.sort(key=lambda feature: feature.get("properties", {}).get("time", 0))
         return {"type": "FeatureCollection", "features": features}
 
-    def _load_layer_artifacts(
-        self, session: Session, run: SimulationRun
-    ) -> list[dict]:
+    def _load_layer_artifacts(self, session: Session, run: SimulationRun) -> list[dict]:
         artifacts = list(
             session.scalars(
                 select(RunArtifact)

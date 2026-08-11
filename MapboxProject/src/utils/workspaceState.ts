@@ -5,7 +5,7 @@ export interface WorkspaceState {
   layerVisibility?: Record<string, boolean>
 }
 
-const WORKSPACE_STATE_KEY = 'swmm-demo-workspace:v1'
+const WORKSPACE_STATE_KEY = 'swmm-workspace:v1'
 
 export function loadWorkspaceState(): WorkspaceState {
   try {

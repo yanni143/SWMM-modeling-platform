@@ -46,7 +46,9 @@ GROUPS = {
 FIELD_SPECS = {
     "SUBCATCHMENTS.area": FieldSpec("SUBCATCHMENTS", "area", "面积", "ha", 0.0001, 1_000_000, 0.01),
     "SUBCATCHMENTS.imperv": FieldSpec("SUBCATCHMENTS", "imperv", "不透水率", "%", 0, 100, 0.1),
-    "SUBCATCHMENTS.width": FieldSpec("SUBCATCHMENTS", "width", "特征宽度", "m", 0.0001, 1_000_000, 0.1),
+    "SUBCATCHMENTS.width": FieldSpec(
+        "SUBCATCHMENTS", "width", "特征宽度", "m", 0.0001, 1_000_000, 0.1
+    ),
     "SUBCATCHMENTS.slope": FieldSpec("SUBCATCHMENTS", "slope", "平均坡度", "%", 0, 100, 0.01),
     "SUBAREAS.n_imperv": FieldSpec("SUBAREAS", "n_imperv", "不透水区曼宁系数", "", 0.001, 1, 0.001),
     "SUBAREAS.n_perv": FieldSpec("SUBAREAS", "n_perv", "透水区曼宁系数", "", 0.001, 1, 0.001),
@@ -58,8 +60,12 @@ FIELD_SPECS = {
     "INFILTRATION.param3": FieldSpec("INFILTRATION", "param3", "下渗参数 3", "", 0, 100000, 0.1),
     "INFILTRATION.param4": FieldSpec("INFILTRATION", "param4", "下渗参数 4", "", 0, 100000, 0.1),
     "INFILTRATION.param5": FieldSpec("INFILTRATION", "param5", "下渗参数 5", "", 0, 100000, 0.1),
-    "JUNCTIONS.elevation": FieldSpec("JUNCTIONS", "elevation", "底部高程", "m", -10000, 10000, 0.01),
-    "JUNCTIONS.max_depth": FieldSpec("JUNCTIONS", "max_depth", "最大深度", "m", 0.0001, 10000, 0.01),
+    "JUNCTIONS.elevation": FieldSpec(
+        "JUNCTIONS", "elevation", "底部高程", "m", -10000, 10000, 0.01
+    ),
+    "JUNCTIONS.max_depth": FieldSpec(
+        "JUNCTIONS", "max_depth", "最大深度", "m", 0.0001, 10000, 0.01
+    ),
     "OUTFALLS.elevation": FieldSpec("OUTFALLS", "elevation", "排口高程", "m", -10000, 10000, 0.01),
     "CONDUITS.length": FieldSpec("CONDUITS", "length", "管线长度", "m", 0.0001, 10_000_000, 0.1),
     "CONDUITS.roughness": FieldSpec("CONDUITS", "roughness", "粗糙度", "", 0.0001, 1, 0.001),
@@ -120,7 +126,10 @@ def build_parameter_catalog(sections: dict[str, list[str]]) -> list[dict[str, An
                 target = record["target"]
                 if not target:
                     continue
-                if section == "XSECTIONS" and record["values"].get("shape", "").upper() != "CIRCULAR":
+                if (
+                    section == "XSECTIONS"
+                    and record["values"].get("shape", "").upper() != "CIRCULAR"
+                ):
                     continue
                 item = objects.setdefault(
                     target,
@@ -214,7 +223,9 @@ def apply_parameter_changes(content: str, changes: list[dict[str, str]]) -> tupl
             )
             del pending[(section, wanted_target, field)]
             changed = True
-        output.append((" ".join(tokens) + ("\n" if line.endswith(("\n", "\r")) else "")) if changed else line)
+        output.append(
+            (" ".join(tokens) + ("\n" if line.endswith(("\n", "\r")) else "")) if changed else line
+        )
 
     if pending:
         missing = ", ".join(f"{section}/{target}/{field}" for section, target, field in pending)

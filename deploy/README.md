@@ -115,7 +115,7 @@ bash deploy/deploy.sh deploy
 
 1. 检查环境文件和占位值。
 2. 校验 Compose 配置。
-3. 拉取 PostGIS、MinIO 基础镜像。
+3. 拉取 PostgreSQL、MinIO 基础镜像。
 4. 构建前端和后端镜像。
 5. 启动容器。
 6. 后端启动时自动执行 `alembic upgrade head`。

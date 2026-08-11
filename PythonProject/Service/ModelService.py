@@ -251,13 +251,6 @@ class ModelService:
                 raise
         return version, applied
 
-    def get_download_url(self, session: Session, version_id: uuid.UUID) -> str:
-        version = self.get_version(session, version_id)
-        return self.storage.presigned_url(
-            version.inp_object_key,
-            bucket=version.inp_bucket,
-        )
-
     def _download_and_validate(
         self, session: Session, version_id: uuid.UUID
     ) -> tuple[ModelVersion, InpValidationResult]:

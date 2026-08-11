@@ -2,7 +2,7 @@ name: swmm-platform
 
 services:
   db:
-    image: postgis/postgis:16-3.5
+    image: postgres:16-bookworm
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

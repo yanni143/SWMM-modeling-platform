@@ -1,7 +1,4 @@
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(
-  /\/$/,
-  '',
-)
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '/').replace(/\/$/, '')
 
 export interface ModelInfo {
   id: string

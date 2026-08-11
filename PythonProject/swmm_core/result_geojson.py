@@ -145,7 +145,9 @@ def parse_result_layers(inp_path: str | Path, out_path: str | Path) -> list[dict
             for field, attribute in sub_attributes.items():
                 try:
                     series = output.subcatch_series(name, attribute)
-                    values[field] = [float(value) if value is not None else None for value in series.values()]
+                    values[field] = [
+                        float(value) if value is not None else None for value in series.values()
+                    ]
                 except Exception:
                     values[field] = [None] * len(times)
             for index in range(len(times)):
@@ -154,7 +156,10 @@ def parse_result_layers(inp_path: str | Path, out_path: str | Path) -> list[dict
                         geometry,
                         name,
                         index,
-                        **{field: series[index] if index < len(series) else None for field, series in values.items()},
+                        **{
+                            field: series[index] if index < len(series) else None
+                            for field, series in values.items()
+                        },
                     )
                 )
 

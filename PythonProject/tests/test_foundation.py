@@ -229,7 +229,3 @@ J1 10.0 3.0 0 0 0
                 content,
                 [{"section": "CONDUITS", "target": "C1", "field": "from_node", "new_value": "J9"}],
             )
-
-
-if __name__ == "__main__":
-    unittest.main()
