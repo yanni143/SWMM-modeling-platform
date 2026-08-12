@@ -31,3 +31,16 @@ class VersionResultLayers(BaseModel):
     created_at: datetime
     finished_at: datetime | None
     layers: list[GeoJsonLayer]
+
+
+class TimelineStep(BaseModel):
+    time_index: int
+    timestamp: str | None
+
+
+class DepthTimeline(BaseModel):
+    version_id: UUID
+    version: int
+    effective_run_id: UUID
+    steps: list[TimelineStep]
+    max_depths: dict[str, float]

@@ -49,7 +49,7 @@
 .batch-value-input input { padding-right: 36px; }
 .batch-value-input small { position: absolute; top: 9px; right: 8px; color: #718086; font: 8px Consolas,monospace; }
 .batch-controls > button { align-self: end; min-height: 31px; color: white; border: 0; background: #23748c; font: 650 9px inherit; cursor: pointer; }
-.no-common-fields { margin: 0; padding: 9px; color: #8c3e32; background: rgba(180,82,66,.08); font-size: 9px; }
+.no-common-fields { margin: 0; padding: 9px; color: #8c3e32; background: rgba(180,82,66,.08); font-size: 12px; }
 .tuning-error { padding: 8px 10px; color: #8c3e32; border-left: 3px solid #b45242; background: rgba(180,82,66,.09); font-size: 10px; }
 .change-ruler { margin-top: 12px; padding: 11px; border: 1px solid rgba(35,116,140,.3); background: #e8f1f1; }
 .change-ruler-title { margin-bottom: 8px; font-size: 12px; font-weight: 650; }

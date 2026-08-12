@@ -3,8 +3,15 @@
     <SidebarPanel
       :layers="layers"
       :layer-visibility="layerVisibility"
+      :timeline-steps="timelineSteps"
+      :active-time-index="activeTimeIndex"
+      :max-depths="maxDepths"
+      :timeline-playing="timelinePlaying"
+      :timeline-loading="timelineLoading"
       @layer-visibility-change="toggleLayerVisibility"
       @layer-order-change="reorderLayer"
+      @time-change="selectTimeStep"
+      @toggle-playback="toggleTimelinePlayback"
     />
     <div id="map" class="map-container"></div>
   </div>
@@ -14,8 +21,13 @@
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import '@/assets/css/MapComponent.css'
-import { getPaint } from '@/assets/js/mapModule'
-import { fetchLatestVersionResultLayers, fetchProjectLayers } from '@/api/models'
+import { getDepthPaint, getPaint } from '@/assets/js/mapModule'
+import {
+  fetchDepthStep,
+  fetchDepthTimeline,
+  fetchLatestVersionResultLayers,
+  fetchProjectLayers,
+} from '@/api/models'
 import eventBus from '@/eventBus'
 import SidebarPanel from './SidebarPanel.vue'
 import FeaturePopupTool from '@/utils/showFeaturePopup'
@@ -42,6 +54,13 @@ export default {
     workspaceResetListener: null,
     stopVersionWatch: null,
     stopResultVersionWatch: null,
+    timelineSteps: [],
+    activeTimeIndex: 0,
+    maxDepths: {},
+    timelinePlaying: false,
+    timelineLoading: false,
+    timelineTimer: null,
+    timelineRequestController: null,
   }),
   mounted() {
     this.mapInstance = new mapboxgl.Map({
@@ -78,6 +97,7 @@ export default {
         if (versionId) {
           if (!this.engineeringStore.running) this.loadResultLayers(versionId)
         } else {
+          this.resetTimeline()
           this.removeLayersBySource('simulation')
         }
       },
@@ -115,36 +135,147 @@ export default {
       try {
         const result = await fetchLatestVersionResultLayers(versionId)
         this.removeLayersBySource('simulation')
-        result.layers.forEach((layer) => this.registerLayer({
-          id: layer.id,
-          name: layer.name,
-          displayName: layer.name,
-          type: layer.geometry_type,
-          source: 'simulation',
-          version: result.version,
-          versionId: result.version_id,
-          data: layer.geojson,
-        }))
+        result.layers.forEach((layer) =>
+          this.registerLayer({
+            id: layer.id,
+            name: layer.name,
+            displayName: layer.name,
+            type: layer.geometry_type,
+            source: 'simulation',
+            version: result.version,
+            versionId: result.version_id,
+            data: layer.geojson,
+          }),
+        )
         this.restoreLayerPresentation()
+        await this.loadTimeline(versionId)
       } catch (error) {
         console.error('历史模拟结果图层加载失败：', error)
       }
     },
 
-    handleModelRunCompleted({ run_id: runId, status, layers, version, model_version_id: versionId }) {
+    async handleModelRunCompleted({
+      run_id: runId,
+      status,
+      layers,
+      version,
+      model_version_id: versionId,
+    }) {
       if (status !== 'success' || !runId) return
       this.removeLayersBySource('simulation')
-      layers.forEach((layer) => this.registerLayer({
-        id: layer.id,
-        name: layer.name,
-        displayName: layer.name,
-        type: layer.geometry_type,
-        source: 'simulation',
-        version,
-        versionId,
-        data: layer.geojson,
-      }))
+      layers.forEach((layer) =>
+        this.registerLayer({
+          id: layer.id,
+          name: layer.name,
+          displayName: layer.name,
+          type: layer.geometry_type,
+          source: 'simulation',
+          version,
+          versionId,
+          data: layer.geojson,
+        }),
+      )
       this.restoreLayerPresentation()
+      await this.loadTimeline(versionId)
+    },
+
+    async loadTimeline(versionId) {
+      this.resetTimeline()
+      try {
+        const timeline = await fetchDepthTimeline(versionId)
+        if (versionId !== this.engineeringStore.activeResultVersionId) return
+        this.timelineSteps = timeline.steps
+        this.maxDepths = timeline.max_depths
+        const lastStep = timeline.steps[timeline.steps.length - 1]
+        if (lastStep) {
+          this.activeTimeIndex = lastStep.time_index
+          this.applyDepthPaints()
+        }
+      } catch (error) {
+        console.error('模拟时间轴加载失败：', error)
+      }
+    },
+
+    async selectTimeStep(timeIndex) {
+      const versionId = this.engineeringStore.activeResultVersionId
+      if (!versionId || (timeIndex === this.activeTimeIndex && !this.timelineLoading)) return
+      this.timelineRequestController?.abort()
+      const controller = new AbortController()
+      this.timelineRequestController = controller
+      this.timelineLoading = true
+      try {
+        const result = await fetchDepthStep(versionId, timeIndex, controller.signal)
+        if (controller.signal.aborted || versionId !== this.engineeringStore.activeResultVersionId)
+          return
+        result.layers.forEach((incoming) => {
+          const source = this.mapInstance?.getSource(`${incoming.id}-source`)
+          if (source) source.setData(incoming.geojson)
+          const descriptor = this.layers.find((layer) => layer.id === incoming.id)
+          if (descriptor) descriptor.data = incoming.geojson
+        })
+        this.activeTimeIndex = timeIndex
+        this.featurePopupTool?.closePopup()
+      } catch (error) {
+        if (error?.name !== 'AbortError') console.error('模拟时间步加载失败：', error)
+      } finally {
+        if (this.timelineRequestController === controller) {
+          this.timelineLoading = false
+          this.timelineRequestController = null
+        }
+      }
+    },
+
+    toggleTimelinePlayback() {
+      if (this.timelinePlaying) return this.stopTimelinePlayback()
+      if (this.timelineSteps.length < 2) return
+      const currentPosition = this.timelineSteps.findIndex(
+        (step) => step.time_index === this.activeTimeIndex,
+      )
+      if (currentPosition === this.timelineSteps.length - 1) {
+        this.selectTimeStep(this.timelineSteps[0].time_index)
+      }
+      this.timelinePlaying = true
+      this.timelineTimer = window.setInterval(() => this.advanceTimeline(), 900)
+    },
+
+    async advanceTimeline() {
+      if (this.timelineLoading) return
+      const currentPosition = this.timelineSteps.findIndex(
+        (step) => step.time_index === this.activeTimeIndex,
+      )
+      const nextStep = this.timelineSteps[currentPosition + 1]
+      if (!nextStep) return this.stopTimelinePlayback()
+      await this.selectTimeStep(nextStep.time_index)
+    },
+
+    stopTimelinePlayback() {
+      if (this.timelineTimer) window.clearInterval(this.timelineTimer)
+      this.timelineTimer = null
+      this.timelinePlaying = false
+    },
+
+    resetTimeline() {
+      this.stopTimelinePlayback()
+      this.timelineRequestController?.abort()
+      this.timelineRequestController = null
+      this.timelineLoading = false
+      this.timelineSteps = []
+      this.activeTimeIndex = 0
+      this.maxDepths = {}
+    },
+
+    applyDepthPaints() {
+      ;[
+        ['result-nodes', 'circle'],
+        ['result-conduits', 'line'],
+      ].forEach(([layerId, type]) => {
+        const mapLayerId = `${layerId}-layer`
+        if (!this.mapInstance?.getLayer(mapLayerId)) return
+        const paints = getDepthPaint(type, this.maxDepths[layerId])
+        Object.entries(paints).forEach(([property, value]) => {
+          this.mapInstance.setPaintProperty(mapLayerId, property, value)
+        })
+      })
     },
 
     registerLayer(layer) {
@@ -201,10 +332,13 @@ export default {
     syncMapLayerOrder() {
       if (!this.mapInstance?.loaded()) return
       // The panel is top-first; Mapbox's style stack is bottom-first.
-      this.layers.slice().reverse().forEach((layer) => {
-        const mapLayerId = `${layer.id}-layer`
-        if (this.mapInstance.getLayer(mapLayerId)) this.mapInstance.moveLayer(mapLayerId)
-      })
+      this.layers
+        .slice()
+        .reverse()
+        .forEach((layer) => {
+          const mapLayerId = `${layer.id}-layer`
+          if (this.mapInstance.getLayer(mapLayerId)) this.mapInstance.moveLayer(mapLayerId)
+        })
     },
 
     restoreLayerPresentation() {
@@ -240,6 +374,7 @@ export default {
 
     async handleWorkspaceReset() {
       this.featurePopupTool?.closePopup()
+      this.resetTimeline()
       this.removeLayersBySource('simulation')
       Object.keys(this.layerVisibility).forEach((layerId) => {
         this.toggleLayerVisibility(layerId, true, false)
@@ -255,26 +390,30 @@ export default {
     },
 
     removeLayersBySource(source) {
-      this.layers.filter((layer) => layer.source === source).forEach((layer) => {
-        const layerId = `${layer.id}-layer`
-        const sourceId = `${layer.id}-source`
-        if (this.mapInstance?.getLayer(layerId)) this.mapInstance.removeLayer(layerId)
-        if (this.mapInstance?.getSource(sourceId)) this.mapInstance.removeSource(sourceId)
-        this.loadedLayers.delete(layer.id)
-        delete this.layerVisibility[layer.id]
-      })
+      this.layers
+        .filter((layer) => layer.source === source)
+        .forEach((layer) => {
+          const layerId = `${layer.id}-layer`
+          const sourceId = `${layer.id}-source`
+          if (this.mapInstance?.getLayer(layerId)) this.mapInstance.removeLayer(layerId)
+          if (this.mapInstance?.getSource(sourceId)) this.mapInstance.removeSource(sourceId)
+          this.loadedLayers.delete(layer.id)
+          delete this.layerVisibility[layer.id]
+        })
       this.layers = this.layers.filter((layer) => layer.source !== source)
     },
 
     fitToProjectLayers(incoming) {
       const points = []
-      incoming.forEach((layer) => layer.geojson.features.forEach((feature) => {
-        const collect = (coordinates) => {
-          if (typeof coordinates?.[0] === 'number') points.push(coordinates)
-          else coordinates?.forEach(collect)
-        }
-        collect(feature.geometry?.coordinates)
-      }))
+      incoming.forEach((layer) =>
+        layer.geojson.features.forEach((feature) => {
+          const collect = (coordinates) => {
+            if (typeof coordinates?.[0] === 'number') points.push(coordinates)
+            else coordinates?.forEach(collect)
+          }
+          collect(feature.geometry?.coordinates)
+        }),
+      )
       const geographic = points.filter(([x, y]) => x >= -180 && x <= 180 && y >= -90 && y <= 90)
       if (geographic.length !== points.length || geographic.length === 0) return
       const bounds = geographic.reduce(
@@ -293,7 +432,9 @@ export default {
     handleMapClick(event) {
       const queryLayers = this.getQueryableLayers()
       if (!queryLayers.length) return
-      const feature = this.mapInstance.queryRenderedFeatures(event.point, { layers: queryLayers })[0]
+      const feature = this.mapInstance.queryRenderedFeatures(event.point, {
+        layers: queryLayers,
+      })[0]
       if (!feature) return this.featurePopupTool?.closePopup()
       const descriptorId = feature.layer.id.replace(/-layer$/, '')
       const descriptor = this.layers.find((layer) => layer.id === descriptorId)
@@ -310,7 +451,9 @@ export default {
 
     handleMouseMove(event) {
       const layers = this.getQueryableLayers()
-      const features = layers.length ? this.mapInstance.queryRenderedFeatures(event.point, { layers }) : []
+      const features = layers.length
+        ? this.mapInstance.queryRenderedFeatures(event.point, { layers })
+        : []
       this.mapInstance.getCanvas().style.cursor = features.length ? 'pointer' : ''
     },
 
@@ -326,7 +469,9 @@ export default {
     },
   },
   beforeUnmount() {
-    if (this.modelRunCompletedListener) eventBus.off('modelRunCompleted', this.modelRunCompletedListener)
+    this.resetTimeline()
+    if (this.modelRunCompletedListener)
+      eventBus.off('modelRunCompleted', this.modelRunCompletedListener)
     if (this.workspaceResetListener) eventBus.off('workspaceReset', this.workspaceResetListener)
     this.stopVersionWatch?.()
     this.stopResultVersionWatch?.()

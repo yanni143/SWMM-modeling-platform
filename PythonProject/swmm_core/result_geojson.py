@@ -28,12 +28,29 @@ def _value(series: Any, attribute: str, timestamp: Any) -> float | None:
         return None
 
 
-def _feature(geometry: dict, name: str, time_index: int, **values: Any) -> dict:
+def _feature(
+    geometry: dict,
+    name: str,
+    time_index: int,
+    timestamp: Any,
+    **values: Any,
+) -> dict:
     return {
         "type": "Feature",
         "geometry": geometry,
-        "properties": {"name": name, "time": time_index, **values},
+        "properties": {
+            "name": name,
+            "time_index": time_index,
+            "timestamp": timestamp.isoformat(),
+            **values,
+        },
     }
+
+
+def _time_index(feature: dict) -> int | float | None:
+    properties = feature.get("properties", {})
+    value = properties.get("time_index", properties.get("time"))
+    return value if isinstance(value, (int, float)) else None
 
 
 def latest_time_step_layers(layers: list[dict]) -> list[dict]:
@@ -47,17 +64,13 @@ def latest_time_step_layers(layers: list[dict]) -> list[dict]:
     for layer in layers:
         geojson = layer.get("geojson", {})
         features = geojson.get("features", [])
-        time_values = [
-            feature.get("properties", {}).get("time")
-            for feature in features
-            if isinstance(feature.get("properties", {}).get("time"), (int, float))
-        ]
+        time_values = [value for feature in features if (value := _time_index(feature)) is not None]
         latest_time = max(time_values) if time_values else None
         latest_features = (
             [
                 feature
                 for feature in features
-                if feature.get("properties", {}).get("time") == latest_time
+                if _time_index(feature) == latest_time
             ]
             if latest_time is not None
             else list(features)
@@ -102,6 +115,7 @@ def parse_result_layers(inp_path: str | Path, out_path: str | Path) -> list[dict
                         geometry,
                         name,
                         index,
+                        timestamp,
                         depth=_value(series, "invert_depth", timestamp),
                         head=_value(series, "hydraulic_head", timestamp),
                         ponded_v=_value(series, "ponded_volume", timestamp),
@@ -121,6 +135,7 @@ def parse_result_layers(inp_path: str | Path, out_path: str | Path) -> list[dict
                         geometry,
                         name,
                         index,
+                        timestamp,
                         rate=_value(series, "flow_rate", timestamp),
                         depth=_value(series, "flow_depth", timestamp),
                         velocity=_value(series, "flow_velocity", timestamp),
@@ -156,6 +171,7 @@ def parse_result_layers(inp_path: str | Path, out_path: str | Path) -> list[dict
                         geometry,
                         name,
                         index,
+                        times[index],
                         **{
                             field: series[index] if index < len(series) else None
                             for field, series in values.items()

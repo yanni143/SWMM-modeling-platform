@@ -53,6 +53,13 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("/api/model-results", paths)
         self.assertIn("/api/model-versions/{version_id}/latest-result/layers", paths)
         self.assertIn("/api/model-versions/{version_id}/latest-result/timeseries", paths)
+        self.assertIn(
+            "/api/model-versions/{version_id}/latest-result/depth-timeline", paths
+        )
+        self.assertIn(
+            "/api/model-versions/{version_id}/latest-result/depth-steps/{time_index}",
+            paths,
+        )
 
     def test_builtin_inp_is_valid_and_upload_route_is_absent(self) -> None:
         validation = validate_inp_file(get_settings().resolved_fixed_inp_path)
@@ -174,7 +181,7 @@ J1 10.0 3.0 0 0 0
             {
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [120.1, 31.1]},
-                "properties": {"name": name, "time": time},
+                "properties": {"name": name, "time_index": time},
             }
             for name in ("J1", "J2")
             for time in (0, 1, 2)
@@ -190,7 +197,10 @@ J1 10.0 3.0 0 0 0
 
         self.assertEqual(len(latest[0]["geojson"]["features"]), 2)
         self.assertEqual(
-            {feature["properties"]["time"] for feature in latest[0]["geojson"]["features"]},
+            {
+                feature["properties"]["time_index"]
+                for feature in latest[0]["geojson"]["features"]
+            },
             {2},
         )
         self.assertEqual(len(layers[0]["geojson"]["features"]), 6)

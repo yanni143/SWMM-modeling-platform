@@ -307,7 +307,9 @@ export default class FeaturePopupTool {
     try {
       const featureName = feature.properties.name
       const data = await fetchLatestVersionTimeSeries(versionId, layer.id, featureName)
-      return (data.features || []).sort((a, b) => a.properties.time - b.properties.time)
+      return (data.features || []).sort(
+        (a, b) => a.properties.time_index - b.properties.time_index,
+      )
     } catch (error) {
       console.error('Error fetching version time series data:', error)
       return null
@@ -321,7 +323,7 @@ export default class FeaturePopupTool {
     // 提取数据并过滤未定义值，同时保持数据同步
     const validData = timeSeriesData
       .map((d) => ({
-        time: d.properties.time,
+        time: d.properties.time_index,
         value: d.properties[param],
       }))
       .filter((item) => item.time !== undefined && item.value !== undefined)

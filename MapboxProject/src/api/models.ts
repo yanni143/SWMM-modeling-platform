@@ -83,6 +83,19 @@ export interface VersionResultLayers extends ModelResultSummary {
   layers: ProjectGeoJsonLayer[]
 }
 
+export interface SimulationTimelineStep {
+  time_index: number
+  timestamp: string | null
+}
+
+export interface DepthTimeline {
+  version_id: string
+  version: number
+  effective_run_id: string
+  steps: SimulationTimelineStep[]
+  max_depths: Record<string, number>
+}
+
 export interface EditableField {
   key: string
   section: string
@@ -168,6 +181,21 @@ export function fetchModelResults(): Promise<ModelResultSummary[]> {
 
 export function fetchLatestVersionResultLayers(versionId: string): Promise<VersionResultLayers> {
   return request(`/api/model-versions/${versionId}/latest-result/layers`)
+}
+
+export function fetchDepthTimeline(versionId: string): Promise<DepthTimeline> {
+  return request(`/api/model-versions/${versionId}/latest-result/depth-timeline`)
+}
+
+export function fetchDepthStep(
+  versionId: string,
+  timeIndex: number,
+  signal?: AbortSignal,
+): Promise<VersionResultLayers> {
+  return request(
+    `/api/model-versions/${versionId}/latest-result/depth-steps/${timeIndex}`,
+    { signal },
+  )
 }
 
 export function fetchLatestVersionTimeSeries(
