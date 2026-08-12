@@ -121,6 +121,29 @@ export interface EditableGroup {
   objects: EditableObject[]
 }
 
+export interface SimulationOptions {
+  start_datetime: string
+  end_datetime: string
+  duration_seconds: number
+  report_step_seconds: number
+  routing_step_seconds: number
+  duration_min_seconds: number
+  duration_max_seconds: number
+  report_step_min_seconds: number
+  max_output_steps: number
+  require_report_step_divisible: boolean
+}
+
+export interface EditableParametersResponse {
+  groups: EditableGroup[]
+  simulation_options: SimulationOptions
+}
+
+export interface SimulationOptionsInput {
+  duration_seconds: number
+  report_step_seconds: number
+}
+
 export interface ParameterChangeInput {
   section: string
   target: string
@@ -207,21 +230,21 @@ export function fetchLatestVersionTimeSeries(
   return request(`/api/model-versions/${versionId}/latest-result/timeseries?${params}`)
 }
 
-export async function fetchEditableParameters(versionId: string): Promise<EditableGroup[]> {
-  const response = await request<{ groups: EditableGroup[] }>(
+export function fetchEditableParameters(versionId: string): Promise<EditableParametersResponse> {
+  return request<EditableParametersResponse>(
     `/api/model-versions/${versionId}/editable-parameters`,
   )
-  return response.groups
 }
 
 export function createAdjustedVersion(
   versionId: string,
   changes: ParameterChangeInput[],
   summary?: string,
+  simulationOptions?: SimulationOptionsInput,
 ): Promise<AdjustedVersionResponse> {
   return request(`/api/model-versions/${versionId}/versions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ changes, summary }),
+    body: JSON.stringify({ changes, summary, simulation_options: simulationOptions }),
   })
 }

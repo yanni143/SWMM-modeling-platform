@@ -3,7 +3,21 @@
 .tuning-heading small, .version-created small { color: #23748c; font: 9px Consolas, monospace; letter-spacing: .14em; }
 .tuning-heading h3 { margin: 2px 0 0; font-size: 14px; }
 .tuning-heading > span { padding: 5px 7px; color: #23748c; border: 1px solid rgba(35,116,140,.35); font: 12px Consolas, monospace; }
+.engineering-heading { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--ink); }
 .tuning-guidance { margin: 10px 0 12px; color: #687b82; font-size: 12px; line-height: 1.5; }
+.simulation-settings { margin: 10px 0 12px; }
+.simulation-setting-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(16,42,55,.1); }
+.simulation-setting-fields label { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.74); }
+.simulation-setting-fields label > span { font-size: 12px; font-weight: 650; }
+.simulation-setting-fields label > span small { color: #23748c; font-weight: 400; }
+.simulation-setting-fields input { box-sizing: border-box; width: 100%; padding: 7px; border: 1px solid #b9c7c7; border-radius: 0; background: #fff; font: 12px Consolas,monospace; outline: none; }
+.simulation-setting-fields input:focus { border-color: #23748c; box-shadow: 0 0 0 2px rgba(35,116,140,.1); }
+.simulation-setting-fields label > small { color: #78888d; font-size: 10px; }
+.simulation-projection { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(16,42,55,.12); }
+.simulation-projection span, .simulation-projection em { color: #687b82; font-size: 12px; font-style: normal; }
+.simulation-projection strong { font: 12px Consolas,monospace; }
+.simulation-projection output { padding: 6px 8px; color: #102a37; border: 1px solid #23748c; background: rgba(104,196,206,.13); font: 12px Consolas,monospace; }
+.simulation-projection em { grid-column: 1 / -1; }
 .selection-mode { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 8px; border: 1px solid rgba(16,42,55,.18); }
 .selection-mode button { min-height: 32px; color: #607178; border: 0; background: rgba(255,255,255,.68); font: 600 10px inherit; cursor: pointer; }
 .selection-mode button + button { border-left: 1px solid rgba(16,42,55,.18); }
@@ -66,7 +80,7 @@
 .version-created { gap: 12px; margin-top: 12px; padding: 12px; color: white; background: #285d50; }
 .version-created > div { display: grid; gap: 2px; }
 .version-created small { color: #9ad4c1; }
-.version-created strong { font-size: 13px; }
+.version-created strong { font-size: 14px; }
 .version-created span { color: #c7dfd6; font-size: 9px; }
 .version-created button { padding: 9px 10px; color: #285d50; border: 0; background: white; font: 650 10px inherit; cursor: pointer; }
-@media (max-width: 760px) { .field-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .field-grid, .simulation-setting-fields { grid-template-columns: 1fr; } .simulation-projection { grid-template-columns: auto 1fr; } .simulation-projection em { grid-column: 1 / -1; } }

@@ -181,12 +181,12 @@ export default {
 .timeline-header {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr) 14px auto;
-  gap: 9px;
+  gap: 5px;
   align-items: center;
 }
 .play-button {
-  width: 30px;
-  height: 30px;
+  width: 25px;
+  height: 25px;
   padding: 0;
   color: #fff;
   border: 0;

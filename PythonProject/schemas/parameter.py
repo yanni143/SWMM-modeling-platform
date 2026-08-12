@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from schemas.model import ModelVersionRead
 
@@ -31,9 +31,23 @@ class EditableGroup(BaseModel):
     objects: list[EditableObject]
 
 
+class SimulationOptions(BaseModel):
+    start_datetime: str
+    end_datetime: str
+    duration_seconds: int
+    report_step_seconds: int
+    routing_step_seconds: float
+    duration_min_seconds: int
+    duration_max_seconds: int
+    report_step_min_seconds: int
+    max_output_steps: int
+    require_report_step_divisible: bool
+
+
 class ParameterCatalogResponse(BaseModel):
     version_id: UUID
     groups: list[EditableGroup]
+    simulation_options: SimulationOptions
 
 
 class ParameterChangeInput(BaseModel):
@@ -43,10 +57,22 @@ class ParameterChangeInput(BaseModel):
     new_value: str = Field(min_length=1, max_length=100)
 
 
+class SimulationOptionsInput(BaseModel):
+    duration_seconds: int = Field(strict=True)
+    report_step_seconds: int = Field(strict=True)
+
+
 class CreateAdjustedVersionRequest(BaseModel):
     summary: Optional[str] = Field(default=None, max_length=500)
     created_by: Optional[str] = Field(default=None, max_length=100)
-    changes: list[ParameterChangeInput] = Field(min_length=1, max_length=5000)
+    changes: list[ParameterChangeInput] = Field(default_factory=list, max_length=5000)
+    simulation_options: Optional[SimulationOptionsInput] = None
+
+    @model_validator(mode="after")
+    def require_changes(self):
+        if not self.changes and self.simulation_options is None:
+            raise ValueError("至少需要提交一项参数修改")
+        return self
 
 
 class AppliedParameterChange(BaseModel):

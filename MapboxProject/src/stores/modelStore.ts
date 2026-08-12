@@ -15,6 +15,8 @@ import {
   type SectionSummary,
   type EditableGroup,
   type ParameterChangeInput,
+  type SimulationOptions,
+  type SimulationOptionsInput,
 } from '@/api/models'
 import {
   clearWorkspaceState,
@@ -34,6 +36,7 @@ interface ModelState {
   running: boolean
   savingVersion: boolean
   parameterGroups: EditableGroup[]
+  simulationOptions: SimulationOptions | null
   availableResults: ModelResultSummary[]
   activeResultVersionId: string | null
   error: string | null
@@ -52,6 +55,7 @@ export const useModelStore = defineStore('model-library', {
     running: false,
     savingVersion: false,
     parameterGroups: [],
+    simulationOptions: null,
     availableResults: [],
     activeResultVersionId: null,
     error: null,
@@ -109,7 +113,9 @@ export const useModelStore = defineStore('model-library', {
       this.error = null
       try {
         this.sections = await fetchSections(versionId)
-        this.parameterGroups = await fetchEditableParameters(versionId)
+        const editableParameters = await fetchEditableParameters(versionId)
+        this.parameterGroups = editableParameters.groups
+        this.simulationOptions = editableParameters.simulation_options
         saveWorkspaceState({ selectedVersionId: versionId })
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'INP 分区读取失败'
@@ -174,13 +180,22 @@ export const useModelStore = defineStore('model-library', {
       const baseline = this.versions.find((version) => version.version === 1)
       if (baseline) await this.selectVersion(baseline.id)
     },
-    async saveAdjustedVersion(changes: ParameterChangeInput[], summary?: string) {
+    async saveAdjustedVersion(
+      changes: ParameterChangeInput[],
+      summary?: string,
+      simulationOptions?: SimulationOptionsInput,
+    ) {
       if (!this.selectedVersionId || !this.selectedModelId) return null
       const parentVersionId = this.selectedVersionId
       this.savingVersion = true
       this.error = null
       try {
-        const result = await createAdjustedVersion(parentVersionId, changes, summary)
+        const result = await createAdjustedVersion(
+          parentVersionId,
+          changes,
+          summary,
+          simulationOptions,
+        )
         this.versions = await fetchVersions(this.selectedModelId)
         await this.selectVersion(result.version.id)
         await this.loadModels(false)

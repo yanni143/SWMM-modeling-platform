@@ -22,6 +22,7 @@ from schemas.parameter import (
     CreateAdjustedVersionResponse,
     EditableGroup,
     ParameterCatalogResponse,
+    SimulationOptions,
 )
 from Service.ModelService import ModelNotFoundError, ModelService, SectionNotFoundError
 from Tools.InpTools.InpValidator import InvalidInpFile
@@ -116,10 +117,13 @@ def get_editable_parameters(
     version_id: UUID, session: Session = Depends(get_db)
 ) -> ParameterCatalogResponse:
     try:
-        groups = ModelService().get_parameter_catalog(session, version_id)
+        catalog = ModelService().get_parameter_catalog(session, version_id)
         return ParameterCatalogResponse(
             version_id=version_id,
-            groups=[EditableGroup.model_validate(group) for group in groups],
+            groups=[EditableGroup.model_validate(group) for group in catalog["groups"]],
+            simulation_options=SimulationOptions.model_validate(
+                catalog["simulation_options"]
+            ),
         )
     except Exception as exc:
         raise translate_service_error(exc) from exc
@@ -140,6 +144,11 @@ def create_adjusted_version(
             session=session,
             parent_version_id=version_id,
             changes=[change.model_dump() for change in payload.changes],
+            simulation_options=(
+                payload.simulation_options.model_dump()
+                if payload.simulation_options
+                else None
+            ),
             summary=payload.summary,
             created_by=payload.created_by,
         )

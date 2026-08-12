@@ -1,10 +1,54 @@
 <template>
-  <section class="tuning-workspace" aria-label="参数调整">
+  <section class="tuning-workspace" aria-label="参数设置">
     <div class="tuning-heading">
       <div>
-        <h3>常用参数调整</h3>
+        <h3>模拟参数设置</h3>
       </div>
-      <span>{{ draftsList.length }} 项待保存</span>
+      <span v-if="simulationOptionsChanged">
+        {{ Number(simulationDurationChanged) + Number(reportStepChanged) }} 项待保存
+      </span>
+    </div>
+
+    <div v-if="store.simulationOptions" class="simulation-settings">
+      <div class="simulation-setting-fields">
+        <label>
+          <span>模拟时长 <small>秒</small></span>
+          <input
+            v-model.number="durationSeconds"
+            type="number"
+            :min="store.simulationOptions.duration_min_seconds"
+            :max="store.simulationOptions.duration_max_seconds"
+            step="1"
+          />
+          <small>
+            {{ store.simulationOptions.duration_min_seconds }}～{{ store.simulationOptions.duration_max_seconds }} 秒
+          </small>
+        </label>
+        <label>
+          <span>输出步长 <small>秒</small></span>
+          <input
+            v-model.number="reportStepSeconds"
+            type="number"
+            :min="effectiveReportStepMinimum"
+            :max="durationSeconds || undefined"
+            step="1"
+          />
+          <small>不小于路由步长 {{ store.simulationOptions.routing_step_seconds }} 秒</small>
+        </label>
+      </div>
+      <div class="simulation-projection">
+        <span>预计结束</span>
+        <strong>{{ estimatedEndTime }}</strong>
+        <output>{{ estimatedOutputSteps }} 个输出点</output>
+        <em v-if="store.simulationOptions.require_report_step_divisible">时长须能被输出步长整除</em>
+      </div>
+    </div>
+
+    <div class="engineering-heading tuning-heading">
+      <div>
+        <h3>工程参数修改</h3>
+      </div>
+      <span v-if="draftsList.length">{{ draftsList.length }} 项待保存</span>
     </div>
 
     <p class="tuning-guidance">从地图或对象列表选择要素；批量模式只调整所选对象共有的参数。</p>
@@ -111,12 +155,26 @@
       <p v-else class="no-common-fields">所选对象没有共同的可调参数，请选择同一种节点类型。</p>
     </div>
 
-    <p v-if="localError" class="tuning-error" role="alert">{{ localError }}</p>
+    <p v-if="displayError" class="tuning-error" role="alert">{{ displayError }}</p>
 
-    <div v-if="draftsList.length" class="change-ruler">
+    <div v-if="pendingChangeCount" class="change-ruler">
       <div class="change-ruler-title">
         <span>变更预览</span>
         <button type="button" @click="clearDrafts">全部撤销</button>
+      </div>
+      <div v-if="simulationDurationChanged" class="change-line">
+        <span>模拟时长</span>
+        <code>{{ store.simulationOptions?.duration_seconds }} 秒</code>
+        <i>→</i>
+        <code>{{ durationSeconds }} 秒</code>
+        <button type="button" aria-label="撤销模拟时长修改" @click="resetDuration">×</button>
+      </div>
+      <div v-if="reportStepChanged" class="change-line">
+        <span>输出步长</span>
+        <code>{{ store.simulationOptions?.report_step_seconds }} 秒</code>
+        <i>→</i>
+        <code>{{ reportStepSeconds }} 秒</code>
+        <button type="button" aria-label="撤销输出步长修改" @click="resetReportStep">×</button>
       </div>
       <div v-for="draft in draftsList" :key="draft.key" class="change-line">
         <span>{{ draft.target }} · {{ draft.label }}</span>
@@ -126,16 +184,14 @@
         <button type="button" aria-label="撤销该项" @click="removeDraft(draft.key)">×</button>
       </div>
       <input v-model.trim="summary" maxlength="500" placeholder="版本说明，例如：降低管线粗糙度" />
-      <button class="save-version" type="button" :disabled="store.savingVersion" @click="saveVersion">
+      <button class="save-version" type="button" :disabled="store.savingVersion || !!simulationError" @click="saveVersion">
         {{ store.savingVersion ? '正在校验并生成…' : `校验并生成 V${nextVersionNumber}` }}
       </button>
     </div>
 
     <div v-if="createdVersion" class="version-created">
       <div>
-        <small>NEW VERSION</small>
-        <strong>V{{ createdVersion.version }} 已生成</strong>
-        <span>原版本未被覆盖</span>
+        <strong>新版本 V{{ createdVersion.version }} 已生成</strong>
       </div>
       <button type="button" :disabled="store.running" @click="runCreatedVersion">
         {{ store.running ? '正在运行…' : `运行 V${createdVersion.version}` }}
@@ -174,6 +230,8 @@ const createdVersion = ref<ModelVersion | null>(null)
 const batchFieldKey = ref('')
 const batchOperation = ref<'set' | 'add' | 'percent'>('set')
 const batchAmount = ref('')
+const durationSeconds = ref(0)
+const reportStepSeconds = ref(0)
 
 const groups = computed(() => store.parameterGroups)
 const activeGroup = computed(() => groups.value.find((group) => group.id === selectedGroupId.value))
@@ -200,7 +258,60 @@ const filteredSelectedCount = computed(() =>
   filteredObjects.value.filter((item) => selectedTargets.value.includes(item.target)).length,
 )
 const draftsList = computed(() => Object.values(drafts.value))
+const simulationDurationChanged = computed(
+  () => durationSeconds.value !== store.simulationOptions?.duration_seconds,
+)
+const reportStepChanged = computed(
+  () => reportStepSeconds.value !== store.simulationOptions?.report_step_seconds,
+)
+const simulationOptionsChanged = computed(
+  () => simulationDurationChanged.value || reportStepChanged.value,
+)
+const pendingChangeCount = computed(
+  () => draftsList.value.length + Number(simulationDurationChanged.value) + Number(reportStepChanged.value),
+)
+const effectiveReportStepMinimum = computed(() =>
+  Math.max(
+    store.simulationOptions?.report_step_min_seconds || 1,
+    Math.ceil(store.simulationOptions?.routing_step_seconds || 0),
+  ),
+)
+const estimatedOutputSteps = computed(() => {
+  if (!Number.isInteger(durationSeconds.value) || !Number.isInteger(reportStepSeconds.value) || reportStepSeconds.value <= 0) return '—'
+  return Math.floor(durationSeconds.value / reportStepSeconds.value)
+})
+const estimatedEndTime = computed(() => {
+  const start = store.simulationOptions?.start_datetime
+  if (!start || !Number.isInteger(durationSeconds.value) || durationSeconds.value <= 0) return '—'
+  return formatDateTime(new Date(parseSimulationDate(start).getTime() + durationSeconds.value * 1000).toISOString())
+})
+const simulationError = computed(() => {
+  const options = store.simulationOptions
+  const duration = durationSeconds.value
+  const reportStep = reportStepSeconds.value
+  if (!options) return ''
+  if (!Number.isInteger(duration)) return '模拟时长必须是整数秒'
+  if (duration < options.duration_min_seconds || duration > options.duration_max_seconds) {
+    return `模拟时长必须在 ${options.duration_min_seconds}～${options.duration_max_seconds} 秒之间`
+  }
+  if (!Number.isInteger(reportStep)) return '输出步长必须是整数秒'
+  if (reportStep < effectiveReportStepMinimum.value) return `输出步长不能小于 ${effectiveReportStepMinimum.value} 秒`
+  if (reportStep > duration) return '输出步长不能大于模拟时长'
+  if (options.require_report_step_divisible && duration % reportStep !== 0) return '模拟时长必须能被输出步长整除'
+  if (Math.floor(duration / reportStep) > options.max_output_steps) return `输出时间点不能超过 ${options.max_output_steps} 个`
+  return ''
+})
+const displayError = computed(() => localError.value || simulationError.value)
 const nextVersionNumber = computed(() => Math.max(...store.versions.map((item) => item.version), 0) + 1)
+
+watch(
+  () => store.simulationOptions,
+  (options) => {
+    durationSeconds.value = options?.duration_seconds || 0
+    reportStepSeconds.value = options?.report_step_seconds || 0
+  },
+  { immediate: true },
+)
 
 watch(
   groups,
@@ -366,11 +477,32 @@ function removeDraft(key: string) {
 function clearDrafts() {
   drafts.value = {}
   localError.value = ''
+  resetDuration()
+  resetReportStep()
+}
+
+function resetDuration() {
+  durationSeconds.value = store.simulationOptions?.duration_seconds || 0
+}
+
+function resetReportStep() {
+  reportStepSeconds.value = store.simulationOptions?.report_step_seconds || 0
+}
+
+function formatDateTime(value: string) {
+  const date = parseSimulationDate(value)
+  if (Number.isNaN(date.getTime())) return value
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
+}
+
+function parseSimulationDate(value: string) {
+  return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`)
 }
 
 async function saveVersion() {
   const parentId = store.selectedVersionId
-  if (!parentId) return
+  if (!parentId || simulationError.value) return
   const result = await store.saveAdjustedVersion(
     draftsList.value.map((draft) => ({
       section: draft.section,
@@ -379,6 +511,12 @@ async function saveVersion() {
       new_value: draft.newValue,
     })),
     summary.value || undefined,
+    simulationOptionsChanged.value
+      ? {
+          duration_seconds: durationSeconds.value,
+          report_step_seconds: reportStepSeconds.value,
+        }
+      : undefined,
   )
   if (!result) return
   createdVersion.value = result.version

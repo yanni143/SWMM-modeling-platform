@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     fixed_model_description: str = "系统内置的固定 SWMM 演示研究区"
     fixed_inp_path: Path = PROJECT_DIR / "resources" / "fixed-study-area.inp"
 
+    simulation_duration_min_seconds: int = 60
+    simulation_duration_max_seconds: int = 86_400
+    report_step_min_seconds: int = 10
+    simulation_require_report_step_divisible: bool = False
+    simulation_max_output_steps: int = 1_000
+
     minio_endpoint: str = "127.0.0.1:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"

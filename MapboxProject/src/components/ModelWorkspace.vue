@@ -8,12 +8,6 @@
       <span class="system-state"><i></i> INP READY</span>
     </div>
 
-    <ol class="process-rail" aria-label="工程准备流程">
-      <li class="active"><span>01</span>内置基线</li>
-      <li :class="{ active: store.selectedVersionId }"><span>02</span>版本管理</li>
-      <li :class="{ active: store.parameterGroups.length }"><span>03</span>运行调参</li>
-    </ol>
-
     <p v-if="store.error" class="error-message" role="alert">{{ store.error }}</p>
 
     <section v-if="store.selectedModel" class="study-area-summary">

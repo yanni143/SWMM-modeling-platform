@@ -14,7 +14,13 @@ from storage.artifact_storage import ArtifactStorageService
 from Tools.InpTools.InpFileHandler import INPFileHandler
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
-from Tools.InpTools.InpParameterEditor import apply_parameter_changes, build_parameter_catalog
+from Tools.InpTools.InpParameterEditor import (
+    apply_parameter_changes,
+    apply_simulation_options,
+    build_parameter_catalog,
+    build_simulation_options,
+)
+from Tools.InpTools.InpParser import INPParser
 from Tools.InpTools.InpValidator import InpValidationResult, validate_inp_file
 
 
@@ -165,15 +171,21 @@ class ModelService:
             source_crs=self.settings.swmm_input_crs,
         )
 
-    def get_parameter_catalog(self, session: Session, version_id: uuid.UUID) -> list[dict]:
+    def get_parameter_catalog(self, session: Session, version_id: uuid.UUID) -> dict:
         _, validation = self._download_and_validate(session, version_id)
-        return build_parameter_catalog(validation.sections)
+        return {
+            "groups": build_parameter_catalog(validation.sections),
+            "simulation_options": build_simulation_options(
+                validation.sections, self.settings
+            ),
+        }
 
     def create_adjusted_version(
         self,
         session: Session,
         parent_version_id: uuid.UUID,
         changes: list[dict[str, str]],
+        simulation_options: Optional[dict[str, int]] = None,
         summary: Optional[str] = None,
         created_by: Optional[str] = None,
     ) -> tuple[ModelVersion, list[dict]]:
@@ -196,7 +208,24 @@ class ModelService:
             content, _ = INPFileHandler.read_file(str(source_path))
             if not content:
                 raise ValueError("无法读取父版本 INP")
-            adjusted_content, applied = apply_parameter_changes(content, changes)
+            adjusted_content = content
+            applied = []
+            if changes:
+                adjusted_content, parameter_changes = apply_parameter_changes(
+                    adjusted_content, changes
+                )
+                applied.extend(parameter_changes)
+            if simulation_options:
+                parsed_sections = INPParser.parse(adjusted_content)
+                adjusted_content, option_changes = apply_simulation_options(
+                    adjusted_content,
+                    parsed_sections,
+                    simulation_options,
+                    self.settings,
+                )
+                applied.extend(option_changes)
+            if not applied:
+                raise ValueError("提交的参数没有发生变化")
             message = INPFileHandler.write_file(str(target_path), adjusted_content)
             if message.startswith("错误"):
                 raise OSError(message)

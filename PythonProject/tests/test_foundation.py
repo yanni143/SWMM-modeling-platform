@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import models  # noqa: F401
 from config import get_settings
@@ -13,7 +14,9 @@ from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpParameterEditor import (
     ParameterValidationError,
     apply_parameter_changes,
+    apply_simulation_options,
     build_parameter_catalog,
+    build_simulation_options,
 )
 from Tools.InpTools.InpValidator import InvalidInpFile, validate_inp_file
 
@@ -48,6 +51,16 @@ class FakeMinio:
 
 
 class FoundationTests(unittest.TestCase):
+    @staticmethod
+    def simulation_settings():
+        return SimpleNamespace(
+            simulation_duration_min_seconds=60,
+            simulation_duration_max_seconds=86400,
+            report_step_min_seconds=10,
+            simulation_require_report_step_divisible=False,
+            simulation_max_output_steps=1000,
+        )
+
     def test_version_result_routes_are_exposed(self) -> None:
         paths = app.openapi()["paths"]
         self.assertIn("/api/model-results", paths)
@@ -219,10 +232,27 @@ J1 10.0 3.0 0 0 0
         subcatchment = next(group for group in groups if group["id"] == "subcatchments")
         conduit = next(group for group in groups if group["id"] == "conduits")
 
-        self.assertGreater(len(subcatchment["objects"][0]["fields"]), 8)
+        subcatchment_fields = {
+            field["key"] for field in subcatchment["objects"][0]["fields"]
+        }
+        self.assertTrue(
+            {
+                "SUBCATCHMENTS.area",
+                "SUBCATCHMENTS.width",
+                "INFILTRATION.param1",
+                "INFILTRATION.param2",
+                "INFILTRATION.param3",
+                "INFILTRATION.param4",
+            }.isdisjoint(subcatchment_fields)
+        )
+        self.assertIn("SUBCATCHMENTS.imperv", subcatchment_fields)
+        self.assertIn("INFILTRATION.param5", subcatchment_fields)
+        conduit_fields = {field["key"] for field in conduit["objects"][0]["fields"]}
+        self.assertNotIn("CONDUITS.length", conduit_fields)
+        self.assertIn("CONDUITS.roughness", conduit_fields)
         self.assertIn(
             "XSECTIONS.geom1",
-            [field["key"] for field in conduit["objects"][0]["fields"]],
+            conduit_fields,
         )
 
     def test_safe_parameter_change_updates_only_whitelisted_value(self) -> None:
@@ -238,4 +268,66 @@ J1 10.0 3.0 0 0 0
             apply_parameter_changes(
                 content,
                 [{"section": "CONDUITS", "target": "C1", "field": "from_node", "new_value": "J9"}],
+            )
+
+    def test_simulation_options_are_read_and_updated_in_seconds(self) -> None:
+        content = """[OPTIONS]
+START_DATE 01/01/2025
+START_TIME 00:00:00
+REPORT_START_DATE 01/01/2025
+REPORT_START_TIME 00:00:00
+END_DATE 01/01/2025
+END_TIME 02:00:00
+REPORT_STEP 00:10:00
+ROUTING_STEP 0:00:10
+
+[JUNCTIONS]
+J1 0 2
+"""
+        sections = {
+            "OPTIONS": content.split("[OPTIONS]\n", 1)[1].split("\n[JUNCTIONS]", 1)[0].splitlines()
+        }
+        current = build_simulation_options(sections, self.simulation_settings())
+        self.assertEqual(current["duration_seconds"], 7200)
+        self.assertEqual(current["report_step_seconds"], 600)
+
+        adjusted, applied = apply_simulation_options(
+            content,
+            sections,
+            {"duration_seconds": 86400, "report_step_seconds": 300},
+            self.simulation_settings(),
+        )
+        self.assertIn("END_DATE             01/02/2025", adjusted)
+        self.assertIn("END_TIME             00:00:00", adjusted)
+        self.assertIn("REPORT_STEP          00:05:00", adjusted)
+        self.assertEqual({item["target"] for item in applied}, {"END_DATE", "END_TIME", "REPORT_STEP"})
+
+    def test_simulation_options_allow_remainder_and_reject_too_small_step(self) -> None:
+        sections = {
+            "OPTIONS": [
+                "START_DATE 01/01/2025",
+                "START_TIME 00:00:00",
+                "REPORT_START_DATE 01/01/2025",
+                "REPORT_START_TIME 00:00:00",
+                "END_DATE 01/01/2025",
+                "END_TIME 02:00:00",
+                "REPORT_STEP 00:10:00",
+                "ROUTING_STEP 0:00:10",
+            ]
+        }
+        content = "[OPTIONS]\n" + "\n".join(sections["OPTIONS"])
+        adjusted, _ = apply_simulation_options(
+            content,
+            sections,
+            {"duration_seconds": 3700, "report_step_seconds": 600},
+            self.simulation_settings(),
+        )
+        self.assertIn("END_TIME             01:01:40", adjusted)
+        self.assertIn("REPORT_STEP          00:10:00", adjusted)
+        with self.assertRaisesRegex(ParameterValidationError, "不能小于 10"):
+            apply_simulation_options(
+                content,
+                sections,
+                {"duration_seconds": 7200, "report_step_seconds": 5},
+                self.simulation_settings(),
             )
