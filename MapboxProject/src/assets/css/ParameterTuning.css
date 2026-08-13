@@ -4,7 +4,6 @@
 .tuning-heading h3 { margin: 2px 0 0; font-size: 14px; }
 .tuning-heading > span { padding: 5px 7px; color: #23748c; border: 1px solid rgba(35,116,140,.35); font: 12px Consolas, monospace; }
 .engineering-heading { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--ink); }
-.tuning-guidance { margin: 10px 0 12px; color: #687b82; font-size: 12px; line-height: 1.5; }
 .simulation-settings { margin: 10px 0 12px; }
 .simulation-setting-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(16,42,55,.1); }
 .simulation-setting-fields label { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.74); }
@@ -29,7 +28,7 @@
 .rainfall-setting-fields input, .rainfall-setting-fields select { box-sizing: border-box; width: 100%; padding: 7px; border: 1px solid #b9c7c7; border-radius: 0; background: #fff; font: 12px Consolas,monospace; outline: none; }
 .rainfall-setting-fields input:focus, .rainfall-setting-fields select:focus { border-color: #23748c; box-shadow: 0 0 0 2px rgba(35,116,140,.1); }
 .rainfall-projection output { white-space: nowrap; }
-.selection-mode { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 8px; border: 1px solid rgba(16,42,55,.18); }
+.selection-mode { display: grid; grid-template-columns: 1fr 1fr; margin: 10px 0 8px; border: 1px solid rgba(16,42,55,.18); }
 .selection-mode button { min-height: 32px; color: #607178; border: 0; background: rgba(255,255,255,.68); font: 600 10px inherit; cursor: pointer; }
 .selection-mode button + button { border-left: 1px solid rgba(16,42,55,.18); }
 .selection-mode button.active { color: #102a37; background: #cfe6e7; }

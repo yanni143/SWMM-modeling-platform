@@ -75,12 +75,11 @@ class FoundationTests(unittest.TestCase):
         self.assertIn(
             "/api/model-versions/{version_id}/latest-result/steps/{time_index}", paths
         )
-        self.assertIn(
+        self.assertNotIn(
             "/api/model-versions/{version_id}/latest-result/depth-timeline", paths
         )
-        self.assertIn(
-            "/api/model-versions/{version_id}/latest-result/depth-steps/{time_index}",
-            paths,
+        self.assertNotIn(
+            "/api/model-versions/{version_id}/latest-result/depth-steps/{time_index}", paths
         )
 
     def test_builtin_inp_is_valid_and_upload_route_is_absent(self) -> None:

@@ -60,11 +60,3 @@ class ResultTimeline(BaseModel):
     steps: list[TimelineStep]
     result_ranges: dict[str, dict[str, ResultValueRange]]
     result_metadata: dict[str, dict[str, ResultFieldMetadata]]
-
-
-class DepthTimeline(BaseModel):
-    version_id: UUID
-    version: int
-    effective_run_id: UUID
-    steps: list[TimelineStep]
-    max_depths: dict[str, float]

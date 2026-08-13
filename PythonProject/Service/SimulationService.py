@@ -36,7 +36,6 @@ class SimulationService:
         "result-conduits.geojson": ("result-conduits", "管线模拟结果", "line"),
         "result-nodes.geojson": ("result-nodes", "节点模拟结果", "circle"),
     }
-    DEPTH_LAYER_IDS = {"result-nodes", "result-conduits"}
     FLOW_UNIT_LABELS = {
         "CFS": "ft³/s",
         "GPM": "gal/min",
@@ -255,35 +254,6 @@ class SimulationService:
             "field_metadata": metadata.get(layer_id, {}),
         }
 
-    def get_latest_version_depth_timeline(
-        self, session: Session, version_id: uuid.UUID
-    ) -> tuple[SimulationRun, ModelVersion, dict]:
-        run, version = self.get_latest_successful_result(session, version_id)
-        layers = self._load_full_layer_artifacts(session, run)
-        steps: dict[int, str | None] = {}
-        maximums = {layer_id: 0.0 for layer_id in self.DEPTH_LAYER_IDS}
-
-        for layer in layers:
-            layer_id = layer.get("id")
-            if layer_id not in self.DEPTH_LAYER_IDS:
-                continue
-            for feature in layer.get("geojson", {}).get("features", []):
-                properties = feature.get("properties", {})
-                time_index = properties.get("time_index", properties.get("time"))
-                if isinstance(time_index, int):
-                    steps.setdefault(time_index, properties.get("timestamp"))
-                depth = properties.get("depth")
-                if isinstance(depth, (int, float)):
-                    maximums[layer_id] = max(maximums[layer_id], float(depth))
-
-        return run, version, {
-            "steps": [
-                {"time_index": index, "timestamp": steps[index]}
-                for index in sorted(steps)
-            ],
-            "max_depths": maximums,
-        }
-
     def get_latest_version_result_timeline(
         self, session: Session, version_id: uuid.UUID
     ) -> tuple[SimulationRun, ModelVersion, dict]:
@@ -408,46 +378,6 @@ class SimulationService:
         ):
             raise SimulationRunError("模拟结果中不存在该时间步")
         return run, version, result_layers
-
-    def get_latest_version_depth_step(
-        self, session: Session, version_id: uuid.UUID, time_index: int
-    ) -> tuple[SimulationRun, ModelVersion, list[dict]]:
-        run, version = self.get_latest_successful_result(session, version_id)
-        layers = self._load_full_layer_artifacts(session, run)
-        depth_layers: list[dict] = []
-
-        for layer in layers:
-            if layer.get("id") not in self.DEPTH_LAYER_IDS:
-                continue
-            features = []
-            for feature in layer.get("geojson", {}).get("features", []):
-                properties = feature.get("properties", {})
-                feature_time = properties.get("time_index", properties.get("time"))
-                if feature_time != time_index:
-                    continue
-                features.append(
-                    {
-                        **feature,
-                        "properties": {
-                            "name": properties.get("name"),
-                            "time_index": time_index,
-                            "timestamp": properties.get("timestamp"),
-                            "depth": properties.get("depth"),
-                        },
-                    }
-                )
-            depth_layers.append(
-                {
-                    **layer,
-                    "geojson": {**layer.get("geojson", {}), "features": features},
-                }
-            )
-
-        if not depth_layers or not any(
-            layer["geojson"]["features"] for layer in depth_layers
-        ):
-            raise SimulationRunError("模拟结果中不存在该时间步")
-        return run, version, depth_layers
 
     def _load_layer_artifacts(self, session: Session, run: SimulationRun) -> list[dict]:
         return latest_time_step_layers(self._load_full_layer_artifacts(session, run))

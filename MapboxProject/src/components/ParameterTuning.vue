@@ -75,8 +75,6 @@
       <span v-if="draftsList.length">{{ draftsList.length }} 项待保存</span>
     </div>
 
-    <p class="tuning-guidance">从地图或对象列表选择要素；批量模式只调整所选对象共有的参数。</p>
-
     <div class="selection-mode" aria-label="选择方式">
       <button type="button" :class="{ active: selectionMode === 'single' }" @click="setSelectionMode('single')">
         单个选择

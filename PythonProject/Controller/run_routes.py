@@ -8,7 +8,6 @@ from urllib3.exceptions import HTTPError as Urllib3HTTPError
 from database.session import get_db
 from schemas.model import GeoJsonLayer
 from schemas.run import (
-    DepthTimeline,
     ModelResultSummary,
     ResultTimeline,
     ResultTimeSeries,
@@ -135,52 +134,6 @@ def get_latest_version_result_step(
 ) -> VersionResultLayers:
     try:
         run, version, layers = SimulationService().get_latest_version_result_step(
-            session, version_id, time_index
-        )
-        return VersionResultLayers(
-            version_id=version.id,
-            version=version.version,
-            effective_run_id=run.id,
-            created_at=run.created_at,
-            finished_at=run.finished_at,
-            layers=[GeoJsonLayer.model_validate(layer) for layer in layers],
-        )
-    except Exception as exc:
-        raise _translate(exc) from exc
-
-
-@router.get(
-    "/model-versions/{version_id}/latest-result/depth-timeline",
-    response_model=DepthTimeline,
-)
-def get_latest_version_depth_timeline(
-    version_id: UUID, session: Session = Depends(get_db)
-) -> DepthTimeline:
-    try:
-        run, version, timeline = SimulationService().get_latest_version_depth_timeline(
-            session, version_id
-        )
-        return DepthTimeline(
-            version_id=version.id,
-            version=version.version,
-            effective_run_id=run.id,
-            **timeline,
-        )
-    except Exception as exc:
-        raise _translate(exc) from exc
-
-
-@router.get(
-    "/model-versions/{version_id}/latest-result/depth-steps/{time_index}",
-    response_model=VersionResultLayers,
-)
-def get_latest_version_depth_step(
-    version_id: UUID,
-    time_index: int,
-    session: Session = Depends(get_db),
-) -> VersionResultLayers:
-    try:
-        run, version, layers = SimulationService().get_latest_version_depth_step(
             session, version_id, time_index
         )
         return VersionResultLayers(

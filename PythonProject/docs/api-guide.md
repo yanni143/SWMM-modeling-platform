@@ -97,6 +97,8 @@ FastAPI 默认提供：
 | `GET` | `/api/model-results` | 获取每个版本最新一次成功结果的摘要 |
 | `GET` | `/api/model-versions/{version_id}/latest-result/layers` | 获取版本最新结果的地图图层 |
 | `GET` | `/api/model-versions/{version_id}/latest-result/timeseries` | 查询单个对象的完整时间序列 |
+| `GET` | `/api/model-versions/{version_id}/latest-result/timeline` | 获取完整结果时间轴、字段范围和单位元数据 |
+| `GET` | `/api/model-versions/{version_id}/latest-result/steps/{time_index}` | 获取指定时间步的全部结果图层 |
 | `GET` | `/api/runs/{run_id}/layers` | 按具体运行 ID 获取地图结果图层 |
 
 ## 4. 通用数据结构
@@ -439,7 +441,7 @@ section 名称在服务中会转换为大写。
 
 `GET /api/model-versions/{version_id}/editable-parameters`
 
-用途：为前端调参面板返回安全、受限的对象和字段目录。
+用途：为前端调参面板返回安全、受限的对象字段目录、模拟设置和设计降雨设置。
 
 路径参数：`version_id`，UUID。
 
@@ -473,7 +475,32 @@ section 名称在服务中会转换为大写。
         }
       ]
     }
-  ]
+  ],
+  "simulation_options": {
+    "start_datetime": "2025-01-01T00:00:00",
+    "end_datetime": "2025-01-01T02:00:00",
+    "duration_seconds": 7200,
+    "report_step_seconds": 600,
+    "routing_step_seconds": 10.0,
+    "duration_min_seconds": 60,
+    "duration_max_seconds": 86400,
+    "report_step_min_seconds": 10,
+    "max_output_steps": 1000,
+    "require_report_step_divisible": false
+  },
+  "rainfall_options": {
+    "start_seconds": 0,
+    "end_seconds": 7200,
+    "return_period": "3year",
+    "gage_name": "RG1",
+    "series_name": "Rainfall01",
+    "time_step_seconds": 60,
+    "available_return_periods": [
+      {"value": "3year", "label": "三年一遇", "peak_mm_h": 60.0},
+      {"value": "5year", "label": "五年一遇", "peak_mm_h": 71.4},
+      {"value": "10year", "label": "十年一遇", "peak_mm_h": 87.6}
+    ]
+  }
 }
 ```
 
@@ -493,11 +520,28 @@ section 名称在服务中会转换为大写。
 
 客户端应以接口返回的字段目录为准，不应自行构造任意 section 或字段名。
 
+模拟与降雨字段说明：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `simulation_options.duration_seconds` | integer | 从模型开始时刻计算的模拟总时长，单位秒 |
+| `simulation_options.report_step_seconds` | integer | 结果输出步长，单位秒 |
+| `simulation_options.routing_step_seconds` | number | 当前路由步长，单位秒，只读 |
+| `rainfall_options.start_seconds` | integer | 相对模拟开始时刻的起雨时间，单位秒 |
+| `rainfall_options.end_seconds` | integer | 相对模拟开始时刻的停雨时间，单位秒 |
+| `rainfall_options.return_period` | string | 当前设计降雨重现期档位 |
+| `rainfall_options.gage_name` | string | `[RAINGAGES]` 中使用该时间序列的雨量计名称 |
+| `rainfall_options.series_name` | string | 被替换的 `[TIMESERIES]` 时间序列名称 |
+| `rainfall_options.time_step_seconds` | integer | 设计降雨生成步长，当前为 60 秒 |
+| `rainfall_options.available_return_periods` | array | 后端允许的重现期及其峰值雨强，峰值单位 mm/h |
+
+对于尚未写入设计降雨元数据的基线版本，后端会根据现有降雨时间序列的非零范围和峰值推断初始设置；新创建的设计降雨版本会在 INP 中写入 `;@DESIGN_RAIN` 注释以便准确回显。
+
 ### 6.8 创建调参版本
 
 `POST /api/model-versions/{version_id}/versions`
 
-用途：基于路径中的父版本应用一组参数修改，并创建新的不可变版本。
+用途：基于路径中的父版本应用普通对象参数、模拟设置和/或设计降雨设置，并创建新的不可变版本。
 
 请求头：
 
@@ -511,7 +555,7 @@ Content-Type: application/json
 
 ```json
 {
-  "summary": "调整子汇水区不透水率与管道粗糙系数",
+  "summary": "调整不透水率、模拟时长和五年一遇设计降雨",
   "created_by": "demo-user",
   "changes": [
     {
@@ -526,7 +570,16 @@ Content-Type: application/json
       "field": "roughness",
       "new_value": "0.015"
     }
-  ]
+  ],
+  "simulation_options": {
+    "duration_seconds": 7200,
+    "report_step_seconds": 300
+  },
+  "rainfall_options": {
+    "start_seconds": 600,
+    "end_seconds": 5400,
+    "return_period": "5year"
+  }
 }
 ```
 
@@ -536,11 +589,27 @@ Content-Type: application/json
 | --- | --- | --- |
 | `summary` | 否 | string 或 `null`，最长 500 字符 |
 | `created_by` | 否 | string 或 `null`，最长 100 字符 |
-| `changes` | 是 | 1 到 5000 项 |
+| `changes` | 条件必填 | 0 到 5000 项；与 `simulation_options`、`rainfall_options` 至少提交一种修改 |
 | `changes[].section` | 是 | string，最长 64 字符 |
 | `changes[].target` | 是 | string，1 到 200 字符 |
 | `changes[].field` | 是 | string，1 到 100 字符 |
 | `changes[].new_value` | 是 | string，1 到 100 字符 |
+| `simulation_options` | 条件必填 | 对象或 `null`；提供时必须同时包含以下两个字段 |
+| `simulation_options.duration_seconds` | 是 | 严格整数，且在服务端配置的允许范围内 |
+| `simulation_options.report_step_seconds` | 是 | 严格整数，不小于路由步长、不大于模拟时长，并满足最大输出点约束 |
+| `rainfall_options` | 条件必填 | 对象或 `null`；提供时必须同时包含以下三个字段 |
+| `rainfall_options.start_seconds` | 是 | 严格整数且不小于 0，必须为 60 秒的整数倍 |
+| `rainfall_options.end_seconds` | 是 | 严格正整数，必须为 60 秒的整数倍且不超过本次有效模拟时长 |
+| `rainfall_options.return_period` | 是 | `3year`、`5year` 或 `10year` |
+
+设计降雨生成和写入规则：
+
+- 后端采用峰现系数 `0.43`、指数 `0.70`、修正项 `7 min` 的芝加哥雨型。
+- 起雨前与停雨后的时间点写入 0；降雨区间按 60 秒步长生成。
+- 后端根据 `[RAINGAGES]` 的 `TIMESERIES` 引用定位目标名称，只替换该名称在 `[TIMESERIES]` 中的记录，其他时间序列保持不变。
+- 雨量计记录间隔同步为 `0:01`。英制流量模型写入前会将 mm/h 转换为 in/h。
+- 第一版要求所有使用内嵌时间序列的雨量计引用同一个降雨时间序列；否则返回 `422`。
+- 同时修改模拟时长和降雨时，以修改后的模拟时长校验降雨结束时间；仅缩短模拟时长而使原降雨越界时也会拒绝创建版本。
 
 响应：`201 Created`。
 
@@ -577,7 +646,7 @@ Content-Type: application/json
 可能错误：
 
 - `404`：父版本不存在。
-- `422`：字段不可编辑、对象不存在、数值越界、请求体不符合约束或生成的 INP 无效。
+- `422`：字段不可编辑、对象不存在、数值越界、降雨范围超过模拟时长、重现期不受支持、存在多个不同降雨时间序列、请求体不符合约束或生成的 INP 无效。
 - `503`：MinIO 不可用。
 
 ### 6.9 下载版本 INP
@@ -864,7 +933,7 @@ GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/times
 
 ### 8.2 调参和运行
 
-1. 根据可调参数目录构造 `changes`。
+1. 根据可调参数目录构造 `changes`、`simulation_options` 和/或 `rainfall_options`。
 2. 调用 `POST /api/model-versions/{parent_version_id}/versions` 创建新版本。
 3. 调用 `POST /api/model-versions/{new_version_id}/runs` 运行新版本。
 4. 使用响应中的最后时间步 `layers` 更新地图。
@@ -891,7 +960,7 @@ curl -X POST \
   http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/versions \
   -H "Content-Type: application/json" \
   -d '{
-    "summary": "调整 S1 不透水率",
+    "summary": "调整 S1 不透水率和设计降雨",
     "created_by": "demo-user",
     "changes": [
       {
@@ -900,7 +969,12 @@ curl -X POST \
         "field": "imperv",
         "new_value": "42"
       }
-    ]
+    ],
+    "rainfall_options": {
+      "start_seconds": 600,
+      "end_seconds": 5400,
+      "return_period": "5year"
+    }
   }'
 ```
 
