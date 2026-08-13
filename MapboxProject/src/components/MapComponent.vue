@@ -5,7 +5,8 @@
       :layer-visibility="layerVisibility"
       :timeline-steps="timelineSteps"
       :active-time-index="activeTimeIndex"
-      :max-depths="maxDepths"
+      :result-ranges="resultRanges"
+      :result-metadata="resultMetadata"
       :timeline-playing="timelinePlaying"
       :timeline-loading="timelineLoading"
       @layer-visibility-change="toggleLayerVisibility"
@@ -21,12 +22,12 @@
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import '@/assets/css/MapComponent.css'
-import { getDepthPaint, getPaint } from '@/assets/js/mapModule'
+import { getConduitDepthPaint, getNodeResultPaint, getPaint } from '@/assets/js/mapModule'
 import {
-  fetchDepthStep,
-  fetchDepthTimeline,
   fetchLatestVersionResultLayers,
   fetchProjectLayers,
+  fetchResultStep,
+  fetchResultTimeline,
 } from '@/api/models'
 import eventBus from '@/eventBus'
 import SidebarPanel from './SidebarPanel.vue'
@@ -56,7 +57,8 @@ export default {
     stopResultVersionWatch: null,
     timelineSteps: [],
     activeTimeIndex: 0,
-    maxDepths: {},
+    resultRanges: {},
+    resultMetadata: {},
     timelinePlaying: false,
     timelineLoading: false,
     timelineTimer: null,
@@ -182,14 +184,15 @@ export default {
     async loadTimeline(versionId) {
       this.resetTimeline()
       try {
-        const timeline = await fetchDepthTimeline(versionId)
+        const timeline = await fetchResultTimeline(versionId)
         if (versionId !== this.engineeringStore.activeResultVersionId) return
         this.timelineSteps = timeline.steps
-        this.maxDepths = timeline.max_depths
+        this.resultRanges = timeline.result_ranges
+        this.resultMetadata = timeline.result_metadata
         const lastStep = timeline.steps[timeline.steps.length - 1]
         if (lastStep) {
           this.activeTimeIndex = lastStep.time_index
-          this.applyDepthPaints()
+          this.applyResultPaints()
         }
       } catch (error) {
         console.error('模拟时间轴加载失败：', error)
@@ -204,7 +207,7 @@ export default {
       this.timelineRequestController = controller
       this.timelineLoading = true
       try {
-        const result = await fetchDepthStep(versionId, timeIndex, controller.signal)
+        const result = await fetchResultStep(versionId, timeIndex, controller.signal)
         if (controller.signal.aborted || versionId !== this.engineeringStore.activeResultVersionId)
           return
         result.layers.forEach((incoming) => {
@@ -261,17 +264,21 @@ export default {
       this.timelineLoading = false
       this.timelineSteps = []
       this.activeTimeIndex = 0
-      this.maxDepths = {}
+      this.resultRanges = {}
+      this.resultMetadata = {}
     },
 
-    applyDepthPaints() {
-      ;[
-        ['result-nodes', 'circle'],
-        ['result-conduits', 'line'],
-      ].forEach(([layerId, type]) => {
+    applyResultPaints() {
+      const paintsByLayer = {
+        'result-nodes': getNodeResultPaint(
+          this.resultRanges['result-nodes']?.depth,
+          this.resultRanges['result-nodes']?.flooding,
+        ),
+        'result-conduits': getConduitDepthPaint(this.resultRanges['result-conduits']?.depth),
+      }
+      Object.entries(paintsByLayer).forEach(([layerId, paints]) => {
         const mapLayerId = `${layerId}-layer`
         if (!this.mapInstance?.getLayer(mapLayerId)) return
-        const paints = getDepthPaint(type, this.maxDepths[layerId])
         Object.entries(paints).forEach(([property, value]) => {
           this.mapInstance.setPaintProperty(mapLayerId, property, value)
         })

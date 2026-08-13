@@ -88,12 +88,24 @@ export interface SimulationTimelineStep {
   timestamp: string | null
 }
 
-export interface DepthTimeline {
+export interface ResultValueRange {
+  minimum: number
+  maximum: number
+}
+
+export interface ResultTimeline {
   version_id: string
   version: number
   effective_run_id: string
   steps: SimulationTimelineStep[]
-  max_depths: Record<string, number>
+  result_ranges: Record<string, Record<string, ResultValueRange>>
+  result_metadata: Record<string, Record<string, { unit: string | null }>>
+}
+
+export interface ResultTimeSeries {
+  type: 'FeatureCollection'
+  features: Array<Record<string, any>>
+  field_metadata: Record<string, { unit: string | null }>
 }
 
 export interface EditableField {
@@ -206,34 +218,29 @@ export function fetchLatestVersionResultLayers(versionId: string): Promise<Versi
   return request(`/api/model-versions/${versionId}/latest-result/layers`)
 }
 
-export function fetchDepthTimeline(versionId: string): Promise<DepthTimeline> {
-  return request(`/api/model-versions/${versionId}/latest-result/depth-timeline`)
+export function fetchResultTimeline(versionId: string): Promise<ResultTimeline> {
+  return request(`/api/model-versions/${versionId}/latest-result/timeline`)
 }
 
-export function fetchDepthStep(
+export function fetchResultStep(
   versionId: string,
   timeIndex: number,
   signal?: AbortSignal,
 ): Promise<VersionResultLayers> {
-  return request(
-    `/api/model-versions/${versionId}/latest-result/depth-steps/${timeIndex}`,
-    { signal },
-  )
+  return request(`/api/model-versions/${versionId}/latest-result/steps/${timeIndex}`, { signal })
 }
 
 export function fetchLatestVersionTimeSeries(
   versionId: string,
   layerId: string,
   featureName: string,
-): Promise<{ type: 'FeatureCollection'; features: Array<Record<string, any>> }> {
+): Promise<ResultTimeSeries> {
   const params = new URLSearchParams({ layer_id: layerId, feature_name: featureName })
   return request(`/api/model-versions/${versionId}/latest-result/timeseries?${params}`)
 }
 
 export function fetchEditableParameters(versionId: string): Promise<EditableParametersResponse> {
-  return request<EditableParametersResponse>(
-    `/api/model-versions/${versionId}/editable-parameters`,
-  )
+  return request<EditableParametersResponse>(`/api/model-versions/${versionId}/editable-parameters`)
 }
 
 export function createAdjustedVersion(

@@ -24,40 +24,55 @@ function getPaint(type, source = 'inp') {
 }
 
 const DEPTH_COLORS = ['#eaf6f8', '#9ddce5', '#318eae', '#083f66']
+const FLOODING_COLORS = ['#fff3df', '#ffc46b', '#f28c28', '#b84600']
 
-function getDepthPaint(type, maximum) {
-  const safeMaximum = Number.isFinite(maximum) && maximum > 0 ? maximum : 1
-  const color = [
-    'case',
-    ['!', ['has', 'depth']],
-    '#a8b1b5',
-    [
-      'interpolate',
-      ['linear'],
-      ['max', 0, ['to-number', ['get', 'depth'], 0]],
-      0,
-      DEPTH_COLORS[0],
-      safeMaximum * 0.33,
-      DEPTH_COLORS[1],
-      safeMaximum * 0.66,
-      DEPTH_COLORS[2],
-      safeMaximum,
-      DEPTH_COLORS[3],
-    ],
+function getGradient(field, range, colors) {
+  const minimum = Number.isFinite(range?.minimum) ? range.minimum : 0
+  const maximum = Number.isFinite(range?.maximum) ? range.maximum : minimum
+  const span = maximum > minimum ? maximum - minimum : 1
+  return [
+    'interpolate',
+    ['linear'],
+    ['max', minimum, ['to-number', ['get', field], minimum]],
+    minimum,
+    colors[0],
+    minimum + span * 0.33,
+    colors[1],
+    minimum + span * 0.66,
+    colors[2],
+    minimum + span,
+    colors[3],
   ]
-  if (type === 'circle') {
-    return {
-      'circle-color': color,
-      'circle-radius': 5,
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 1,
-    }
-  }
+}
+
+function getNodeResultPaint(depthRange, floodingRange) {
+  const flooding = ['to-number', ['get', 'flooding'], 0]
+  const hasFlooding = ['>', flooding, 0]
   return {
-    'line-color': color,
+    'circle-color': [
+      'case',
+      hasFlooding,
+      getGradient('flooding', floodingRange, FLOODING_COLORS),
+      ['has', 'depth'],
+      getGradient('depth', depthRange, DEPTH_COLORS),
+      '#a8b1b5',
+    ],
+    'circle-radius': 5,
+    'circle-stroke-width': 0,
+  }
+}
+
+function getConduitDepthPaint(depthRange) {
+  return {
+    'line-color': [
+      'case',
+      ['has', 'depth'],
+      getGradient('depth', depthRange, DEPTH_COLORS),
+      '#a8b1b5',
+    ],
     'line-width': 3,
     'line-opacity': 0.92,
   }
 }
 
-export { DEPTH_COLORS, getDepthPaint, getPaint }
+export { DEPTH_COLORS, FLOODING_COLORS, getConduitDepthPaint, getNodeResultPaint, getPaint }

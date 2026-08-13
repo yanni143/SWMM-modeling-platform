@@ -1,4 +1,5 @@
 import json
+import math
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -17,6 +18,8 @@ from swmm_core.result_geojson import (
     parse_result_layers,
     write_result_layers,
 )
+from Tools.InpTools.InpInspector import data_lines
+from Tools.InpTools.InpValidator import validate_inp_file
 
 
 class SimulationRunError(RuntimeError):
@@ -34,6 +37,14 @@ class SimulationService:
         "result-nodes.geojson": ("result-nodes", "节点模拟结果", "circle"),
     }
     DEPTH_LAYER_IDS = {"result-nodes", "result-conduits"}
+    FLOW_UNIT_LABELS = {
+        "CFS": "ft³/s",
+        "GPM": "gal/min",
+        "MGD": "MGD",
+        "CMS": "m³/s",
+        "LPS": "L/s",
+        "MLD": "ML/d",
+    }
 
     def __init__(self, storage: ArtifactStorageService | None = None) -> None:
         self.settings = get_settings()
@@ -200,7 +211,7 @@ class SimulationService:
         layer_id: str,
         feature_name: str,
     ) -> dict:
-        run, _ = self.get_latest_successful_result(session, version_id)
+        run, version = self.get_latest_successful_result(session, version_id)
         filename = next(
             (
                 artifact_filename
@@ -237,7 +248,12 @@ class SimulationService:
                 "time_index", feature.get("properties", {}).get("time", 0)
             )
         )
-        return {"type": "FeatureCollection", "features": features}
+        metadata = self._build_result_metadata(version)
+        return {
+            "type": "FeatureCollection",
+            "features": features,
+            "field_metadata": metadata.get(layer_id, {}),
+        }
 
     def get_latest_version_depth_timeline(
         self, session: Session, version_id: uuid.UUID
@@ -267,6 +283,131 @@ class SimulationService:
             ],
             "max_depths": maximums,
         }
+
+    def get_latest_version_result_timeline(
+        self, session: Session, version_id: uuid.UUID
+    ) -> tuple[SimulationRun, ModelVersion, dict]:
+        """Return time steps and numeric ranges grouped by result layer and field."""
+        run, version = self.get_latest_successful_result(session, version_id)
+        layers = self._load_full_layer_artifacts(session, run)
+        steps: dict[int, str | None] = {}
+        ranges: dict[str, dict[str, dict[str, float]]] = {}
+        metadata_fields = {"time", "time_index"}
+
+        for layer in layers:
+            layer_id = layer.get("id")
+            if not isinstance(layer_id, str):
+                continue
+            layer_ranges: dict[str, dict[str, float]] = {}
+            for feature in layer.get("geojson", {}).get("features", []):
+                properties = feature.get("properties", {})
+                time_index = properties.get("time_index", properties.get("time"))
+                if isinstance(time_index, int) and not isinstance(time_index, bool):
+                    steps.setdefault(time_index, properties.get("timestamp"))
+
+                for field, value in properties.items():
+                    if field in metadata_fields or isinstance(value, bool):
+                        continue
+                    if not isinstance(value, (int, float)) or not math.isfinite(value):
+                        continue
+                    numeric_value = float(value)
+                    value_range = layer_ranges.setdefault(
+                        field, {"minimum": numeric_value, "maximum": numeric_value}
+                    )
+                    value_range["minimum"] = min(value_range["minimum"], numeric_value)
+                    value_range["maximum"] = max(value_range["maximum"], numeric_value)
+            if layer_ranges:
+                ranges[layer_id] = layer_ranges
+
+        return run, version, {
+            "steps": [
+                {"time_index": index, "timestamp": steps[index]}
+                for index in sorted(steps)
+            ],
+            "result_ranges": ranges,
+            "result_metadata": self._build_result_metadata(version),
+        }
+
+    def _build_result_metadata(self, version: ModelVersion) -> dict[str, dict[str, dict]]:
+        flow_units = self._load_flow_units(version)
+        flow_unit_label = self.FLOW_UNIT_LABELS.get(flow_units, flow_units)
+        is_us_customary = flow_units in {"CFS", "GPM", "MGD"}
+        length_unit = "ft" if is_us_customary else "m"
+        volume_unit = "ft³" if is_us_customary else "m³"
+        velocity_unit = "ft/s" if is_us_customary else "m/s"
+        precipitation_rate_unit = "in/hr" if is_us_customary else "mm/hr"
+        precipitation_depth_unit = "in" if is_us_customary else "mm"
+        return {
+            "result-nodes": {
+                "depth": {"unit": length_unit},
+                "head": {"unit": length_unit},
+                "ponded_v": {"unit": volume_unit},
+                "lateral_i": {"unit": flow_unit_label},
+                "total_i": {"unit": flow_unit_label},
+                "flooding": {"unit": flow_unit_label},
+            },
+            "result-conduits": {
+                "rate": {"unit": flow_unit_label},
+                "depth": {"unit": length_unit},
+                "velocity": {"unit": velocity_unit},
+                "volume": {"unit": volume_unit},
+                "capacity": {"unit": None},
+            },
+            "result-subcatchments": {
+                "rain": {"unit": precipitation_rate_unit},
+                "snow": {"unit": precipitation_depth_unit},
+                "evap": {"unit": precipitation_rate_unit},
+                "infilt": {"unit": precipitation_rate_unit},
+                "runoff": {"unit": flow_unit_label},
+                "gw_flow": {"unit": flow_unit_label},
+                "soil_moist": {"unit": None},
+            },
+        }
+
+    def _load_flow_units(self, version: ModelVersion) -> str:
+        runtime = self.settings.resolved_runtime_dir
+        runtime.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=f"units-{version.id}-", dir=runtime) as directory:
+            path = Path(directory) / "model.inp"
+            self.storage.download_to(
+                version.inp_object_key, path, bucket=version.inp_bucket
+            )
+            sections = validate_inp_file(path).sections
+        for line in data_lines(sections.get("OPTIONS", [])):
+            values = line.split()
+            if len(values) >= 2 and values[0].upper() == "FLOW_UNITS":
+                return values[1].upper()
+        return ""
+
+    def get_latest_version_result_step(
+        self, session: Session, version_id: uuid.UUID, time_index: int
+    ) -> tuple[SimulationRun, ModelVersion, list[dict]]:
+        """Return every result layer and property for one simulation time step."""
+        run, version = self.get_latest_successful_result(session, version_id)
+        layers = self._load_full_layer_artifacts(session, run)
+        result_layers: list[dict] = []
+
+        for layer in layers:
+            features = [
+                feature
+                for feature in layer.get("geojson", {}).get("features", [])
+                if feature.get("properties", {}).get(
+                    "time_index", feature.get("properties", {}).get("time")
+                )
+                == time_index
+            ]
+            result_layers.append(
+                {
+                    **layer,
+                    "geojson": {**layer.get("geojson", {}), "features": features},
+                }
+            )
+
+        if not result_layers or not any(
+            layer["geojson"]["features"] for layer in result_layers
+        ):
+            raise SimulationRunError("模拟结果中不存在该时间步")
+        return run, version, result_layers
 
     def get_latest_version_depth_step(
         self, session: Session, version_id: uuid.UUID, time_index: int

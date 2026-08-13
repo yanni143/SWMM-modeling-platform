@@ -11,13 +11,13 @@
     </button>
 
     <div v-show="!isCollapsed" class="result-content">
-      <aside class="depth-legends" aria-label="水深图例">
-        <div v-for="legend in legends" :key="legend.id" class="depth-legend">
+      <aside class="result-legends" aria-label="模拟结果图例">
+        <div v-for="legend in legends" :key="legend.id" class="result-legend">
           <strong>{{ legend.label }}</strong>
-          <i aria-hidden="true"></i>
+          <i :class="legend.palette" aria-hidden="true"></i>
           <div class="legend-values">
-            <span>0</span>
-            <span>{{ formatDepth(legend.maximum) }}</span>
+            <span>{{ formatValue(legend.minimum) }}</span>
+            <span>{{ formatValue(legend.maximum) }} {{ legend.unit }}</span>
           </div>
         </div>
       </aside>
@@ -75,7 +75,8 @@ export default {
   props: {
     steps: { type: Array, required: true },
     activeTimeIndex: { type: Number, required: true },
-    maxDepths: { type: Object, required: true },
+    resultRanges: { type: Object, required: true },
+    resultMetadata: { type: Object, required: true },
     playing: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
   },
@@ -93,8 +94,27 @@ export default {
     },
     legends() {
       return [
-        { id: 'nodes', label: '节点水深', maximum: this.maxDepths['result-nodes'] || 0 },
-        { id: 'conduits', label: '管线水深', maximum: this.maxDepths['result-conduits'] || 0 },
+        {
+          id: 'nodes-depth',
+          label: '节点水深',
+          palette: 'depth',
+          unit: this.getUnit('result-nodes', 'depth'),
+          ...this.getRange('result-nodes', 'depth'),
+        },
+        {
+          id: 'conduits-depth',
+          label: '管线水深',
+          palette: 'depth',
+          unit: this.getUnit('result-conduits', 'depth'),
+          ...this.getRange('result-conduits', 'depth'),
+        },
+        {
+          id: 'nodes-flooding',
+          label: '节点溢流量',
+          palette: 'flooding',
+          unit: this.getUnit('result-nodes', 'flooding'),
+          ...this.getRange('result-nodes', 'flooding'),
+        },
       ]
     },
   },
@@ -117,9 +137,15 @@ export default {
       const clock = time.slice(0, 8)
       return compact ? `${date.slice(5)} ${clock.slice(0, 5)}` : `${date} ${clock}`
     },
-    formatDepth(value) {
+    getRange(layerId, field) {
+      return this.resultRanges[layerId]?.[field] || { minimum: 0, maximum: 0 }
+    },
+    getUnit(layerId, field) {
+      return this.resultMetadata[layerId]?.[field]?.unit || ''
+    },
+    formatValue(value) {
       if (!Number.isFinite(value)) return '—'
-      return `${Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`
+      return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 3 })
     },
   },
   watch: {
@@ -264,24 +290,27 @@ export default {
   }
 }
 
-.depth-legends {
+.result-legends {
   display: grid;
   gap: 14px;
   padding-bottom: 13px;
 }
-.depth-legend {
+.result-legend {
   display: grid;
   gap: 6px;
 }
-.depth-legend strong {
+.result-legend strong {
   font-size: 14px;
   font-weight: 400;
 }
-.depth-legend i {
+.result-legend i {
   display: block;
   width: 100%;
   height: 8px;
   background: linear-gradient(90deg, #eaf6f8, #9ddce5, #318eae, #083f66);
+}
+.result-legend i.flooding {
+  background: linear-gradient(90deg, #fff3df, #ffc46b, #f28c28, #b84600);
 }
 .legend-values {
   display: flex;

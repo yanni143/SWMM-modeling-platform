@@ -38,6 +38,30 @@ class TimelineStep(BaseModel):
     timestamp: str | None
 
 
+class ResultValueRange(BaseModel):
+    minimum: float
+    maximum: float
+
+
+class ResultFieldMetadata(BaseModel):
+    unit: str | None = None
+
+
+class ResultTimeSeries(BaseModel):
+    type: str = "FeatureCollection"
+    features: list[dict[str, Any]]
+    field_metadata: dict[str, ResultFieldMetadata]
+
+
+class ResultTimeline(BaseModel):
+    version_id: UUID
+    version: int
+    effective_run_id: UUID
+    steps: list[TimelineStep]
+    result_ranges: dict[str, dict[str, ResultValueRange]]
+    result_metadata: dict[str, dict[str, ResultFieldMetadata]]
+
+
 class DepthTimeline(BaseModel):
     version_id: UUID
     version: int

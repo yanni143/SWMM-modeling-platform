@@ -66,6 +66,10 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("/api/model-results", paths)
         self.assertIn("/api/model-versions/{version_id}/latest-result/layers", paths)
         self.assertIn("/api/model-versions/{version_id}/latest-result/timeseries", paths)
+        self.assertIn("/api/model-versions/{version_id}/latest-result/timeline", paths)
+        self.assertIn(
+            "/api/model-versions/{version_id}/latest-result/steps/{time_index}", paths
+        )
         self.assertIn(
             "/api/model-versions/{version_id}/latest-result/depth-timeline", paths
         )

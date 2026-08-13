@@ -10,7 +10,8 @@
       v-if="timelineSteps.length"
       :steps="timelineSteps"
       :active-time-index="activeTimeIndex"
-      :max-depths="maxDepths"
+      :result-ranges="resultRanges"
+      :result-metadata="resultMetadata"
       :playing="timelinePlaying"
       :loading="timelineLoading"
       @time-change="(timeIndex) => $emit('time-change', timeIndex)"
@@ -31,7 +32,8 @@ export default {
     layerVisibility: { type: Object, required: true },
     timelineSteps: { type: Array, required: true },
     activeTimeIndex: { type: Number, required: true },
-    maxDepths: { type: Object, required: true },
+    resultRanges: { type: Object, required: true },
+    resultMetadata: { type: Object, required: true },
     timelinePlaying: { type: Boolean, default: false },
     timelineLoading: { type: Boolean, default: false },
   },

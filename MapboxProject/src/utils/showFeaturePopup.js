@@ -101,7 +101,8 @@ export default class FeaturePopupTool {
 
       const chartContainer = document.getElementById('time-series-chart')
       if (chartContainer) {
-        chartContainer.innerHTML = '<div style="color: #f56565; text-align: center;">Failed to load data</div>'
+        chartContainer.innerHTML =
+          '<div style="color: #f56565; text-align: center;">Failed to load data</div>'
       }
     }, 0)
   }
@@ -112,16 +113,18 @@ export default class FeaturePopupTool {
   createTimeSeriesChart(feature, layer, timeSeriesData) {
     const layerName = layer.name
     // 根据图层类型获取参数选项
-    const paramOptions = this.getParamOptionsByLayer(layerName, timeSeriesData[0]?.properties)
+    const paramOptions = this.getParamOptionsByLayer(layer, timeSeriesData)
 
     const currentVersionId = layer.versionId || this.modelStore?.activeResultVersionId
     const resultVersions = this.modelStore?.availableResults || []
     const versionOptions = resultVersions
-      .map((result) => `
+      .map(
+        (result) => `
         <option value="${result.version_id}" ${result.version_id === currentVersionId ? 'selected' : ''}>
           V${result.version}
         </option>
-      `)
+      `,
+      )
       .join('')
 
     return `
@@ -169,47 +172,28 @@ export default class FeaturePopupTool {
   /**
    * 根据图层类型获取参数选项
    */
-  getParamOptionsByLayer(layerName, sampleProperties = {}) {
+  getParamsByLayer(layer) {
     // 定义各图层的参数配置
     const layerParams = {
       // 节点模拟结果
-      '管点模拟结果': [
+      'result-nodes': [
         { value: 'depth', label: 'Depth' },
         { value: 'head', label: 'Head' },
         { value: 'lateral_i', label: 'Lateral inflow' },
         { value: 'total_i', label: 'Total inflow' },
         { value: 'flooding', label: 'Flooding' },
         { value: 'ponded_v', label: 'Ponded volume' },
-        { value: 'pollut', label: 'Pollutant' },
-      ],
-      '节点模拟结果': [
-        { value: 'depth', label: 'Depth' },
-        { value: 'head', label: 'Head' },
-        { value: 'lateral_i', label: 'Lateral inflow' },
-        { value: 'total_i', label: 'Total inflow' },
-        { value: 'flooding', label: 'Flooding' },
-        { value: 'ponded_v', label: 'Ponded volume' },
-        { value: 'pollut', label: 'Pollutant' },
       ],
       // 管段模拟结果
-      '管段模拟结果': [
+      'result-conduits': [
         { value: 'rate', label: 'Flow rate' },
         { value: 'depth', label: 'Depth' },
         { value: 'velocity', label: 'Velocity' },
         { value: 'volume', label: 'Volume' },
         { value: 'capacity', label: 'Capacity' },
-        { value: 'pollut', label: 'Pollutant' },
-      ],
-      '管线模拟结果': [
-        { value: 'rate', label: 'Flow rate' },
-        { value: 'depth', label: 'Depth' },
-        { value: 'velocity', label: 'Velocity' },
-        { value: 'volume', label: 'Volume' },
-        { value: 'capacity', label: 'Capacity' },
-        { value: 'pollut', label: 'Pollutant' },
       ],
       // 子汇水区模拟结果
-      '子汇水区模拟结果': [
+      'result-subcatchments': [
         { value: 'rain', label: 'Rainfall' },
         { value: 'runoff', label: 'Runoff' },
         { value: 'infilt', label: 'Infiltration' },
@@ -217,46 +201,75 @@ export default class FeaturePopupTool {
         { value: 'snow', label: 'Snow' },
         { value: 'gw_flow', label: 'Groundwater flow' },
         { value: 'soil_moist', label: 'Soil moisture' },
-        { value: 'pollut', label: 'Pollutant' },
       ],
     }
 
-    // 获取当前图层对应的参数配置
-    const params = layerParams[layerName] || []
+    const legacyLayerIds = {
+      管点模拟结果: 'result-nodes',
+      节点模拟结果: 'result-nodes',
+      管段模拟结果: 'result-conduits',
+      管线模拟结果: 'result-conduits',
+      子汇水区模拟结果: 'result-subcatchments',
+    }
+    const layerId = layer?.id || legacyLayerIds[layer?.name]
+    return layerParams[layerId] || []
+  }
 
-    // 动态过滤：仅保留数据中实际存在的参数
-    const availableParams = params.filter((param) => {
-      // 检查样本数据中是否存在该参数
-      return sampleProperties[param.value] !== undefined
-    })
+  getAvailableParams(layer, timeSeriesData = []) {
+    return this.getParamsByLayer(layer).filter((param) =>
+      timeSeriesData.some((feature) => Number.isFinite(feature.properties?.[param.value])),
+    )
+  }
 
-    // 如果没有可用参数，则回退到完整配置
+  getParamOptionsByLayer(layer, timeSeriesData = []) {
+    const params = this.getParamsByLayer(layer)
+    const availableParams = this.getAvailableParams(layer, timeSeriesData)
     const finalParams = availableParams.length > 0 ? availableParams : params
 
-    // 生成下拉选项 HTML
     return finalParams
       .map((param) => `<option value="${param.value}">${param.label}</option>`)
       .join('')
+  }
+
+  refreshParamOptions(paramSelect, layer, timeSeriesData, preferredParam = '') {
+    const availableParams = this.getAvailableParams(layer, timeSeriesData)
+    paramSelect.innerHTML = availableParams
+      .map((param) => `<option value="${param.value}">${param.label}</option>`)
+      .join('')
+
+    const selectedParam = availableParams.some((param) => param.value === preferredParam)
+      ? preferredParam
+      : availableParams[0]?.value || ''
+    paramSelect.value = selectedParam
+    paramSelect.disabled = availableParams.length === 0
+    return selectedParam
   }
 
   /**
    * 渲染时序图表
    */
   renderTimeSeriesChart(feature, layer, timeSeriesData) {
-    const layerName = layer.name
     const chartContainer = document.getElementById('time-series-chart')
     const paramSelect = document.getElementById('time-series-param')
     const versionSelect = document.getElementById('result-version-selector')
 
     if (!chartContainer || !paramSelect) return
 
-    // 保存当前要素和图层信息，便于后续重新加载
-    this.currentFeature = feature
-    this.currentLayerName = layerName
-
     // 初次渲染
     let displayedTimeSeriesData = timeSeriesData
-    this.updateTimeSeriesChart(chartContainer, displayedTimeSeriesData, paramSelect.value)
+    let displayedFieldMetadata = timeSeriesData.fieldMetadata || {}
+    const initialParam = this.refreshParamOptions(
+      paramSelect,
+      layer,
+      displayedTimeSeriesData,
+      paramSelect.value,
+    )
+    this.updateTimeSeriesChart(
+      chartContainer,
+      displayedTimeSeriesData,
+      initialParam,
+      displayedFieldMetadata,
+    )
     const dataPointsInfo = document.getElementById('data-points-info')
     if (dataPointsInfo) {
       dataPointsInfo.textContent = `Number of data points: ${displayedTimeSeriesData.length}`
@@ -264,7 +277,12 @@ export default class FeaturePopupTool {
 
     // 监听参数切换
     paramSelect.addEventListener('change', () => {
-      this.updateTimeSeriesChart(chartContainer, displayedTimeSeriesData, paramSelect.value)
+      this.updateTimeSeriesChart(
+        chartContainer,
+        displayedTimeSeriesData,
+        paramSelect.value,
+        displayedFieldMetadata,
+      )
     })
 
     // 按版本查询该版本最新一次成功运行的结果
@@ -273,31 +291,45 @@ export default class FeaturePopupTool {
         const selectedVersionId = versionSelect.value
 
         // 显示加载状态
-        chartContainer.innerHTML = '<div style="color: #666; text-align: center;">Loading data...</div>'
-        
+        chartContainer.innerHTML =
+          '<div style="color: #666; text-align: center;">Loading data...</div>'
+
         try {
           const newTimeSeriesData = await this.fetchTimeSeriesDataByVersion(
             feature,
             layer,
             selectedVersionId,
           )
-          
+
           if (newTimeSeriesData && newTimeSeriesData.length > 0) {
             displayedTimeSeriesData = newTimeSeriesData
-            // 用新数据更新图表
-            this.updateTimeSeriesChart(chartContainer, displayedTimeSeriesData, paramSelect.value)
-            
+            displayedFieldMetadata = newTimeSeriesData.fieldMetadata || {}
+            const selectedParam = this.refreshParamOptions(
+              paramSelect,
+              layer,
+              displayedTimeSeriesData,
+              paramSelect.value,
+            )
+            this.updateTimeSeriesChart(
+              chartContainer,
+              displayedTimeSeriesData,
+              selectedParam,
+              displayedFieldMetadata,
+            )
+
             // 更新数据点数量信息
             const dataPointsInfo = document.getElementById('data-points-info')
             if (dataPointsInfo) {
               dataPointsInfo.textContent = `Number of data points: ${newTimeSeriesData.length}`
             }
           } else {
-            chartContainer.innerHTML = '<div style="color: #999; text-align: center;">No data available for this simulation</div>'
+            chartContainer.innerHTML =
+              '<div style="color: #999; text-align: center;">No data available for this simulation</div>'
           }
         } catch (error) {
           console.error('Error loading time series data:', error)
-          chartContainer.innerHTML = '<div style="color: #f56565; text-align: center;">Failed to load data</div>'
+          chartContainer.innerHTML =
+            '<div style="color: #f56565; text-align: center;">Failed to load data</div>'
         }
       })
     }
@@ -307,9 +339,11 @@ export default class FeaturePopupTool {
     try {
       const featureName = feature.properties.name
       const data = await fetchLatestVersionTimeSeries(versionId, layer.id, featureName)
-      return (data.features || []).sort(
+      const features = (data.features || []).sort(
         (a, b) => a.properties.time_index - b.properties.time_index,
       )
+      features.fieldMetadata = data.field_metadata || {}
+      return features
     } catch (error) {
       console.error('Error fetching version time series data:', error)
       return null
@@ -319,14 +353,14 @@ export default class FeaturePopupTool {
   /**
    * 更新图表
    */
-  updateTimeSeriesChart(container, timeSeriesData, param) {
+  updateTimeSeriesChart(container, timeSeriesData, param, fieldMetadata = {}) {
     // 提取数据并过滤未定义值，同时保持数据同步
     const validData = timeSeriesData
       .map((d) => ({
         time: d.properties.time_index,
         value: d.properties[param],
       }))
-      .filter((item) => item.time !== undefined && item.value !== undefined)
+      .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.value))
 
     if (validData.length === 0) {
       container.innerHTML = '<div style="color: #999; text-align: center;">No data available</div>'
@@ -341,14 +375,14 @@ export default class FeaturePopupTool {
     container.innerHTML = ''
 
     // 创建简单的 SVG 图表
-    const svg = this.createSimpleChart(container, times, values, param)
+    const svg = this.createSimpleChart(container, times, values, param, fieldMetadata[param]?.unit)
     container.appendChild(svg)
   }
 
   /**
    * 创建简单的 SVG 折线图
    */
-  createSimpleChart(container, times, values, param) {
+  createSimpleChart(container, times, values, param, unit) {
     const width = container.clientWidth - 40
     const height = container.clientHeight - 40
     const padding = { top: 20, right: 20, bottom: 30, left: 50 }
@@ -434,7 +468,7 @@ export default class FeaturePopupTool {
     })
 
     // 添加坐标轴
-    this.addChartAxes(svg, times, values, param, width, height, padding)
+    this.addChartAxes(svg, times, values, param, unit, width, height, padding)
 
     return svg
   }
@@ -442,7 +476,7 @@ export default class FeaturePopupTool {
   /**
    * 添加坐标轴
    */
-  addChartAxes(svg, times, values, param, width, height, padding) {
+  addChartAxes(svg, times, values, param, unit, width, height, padding) {
     // X 轴
     const xAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line')
     xAxis.setAttribute('x1', padding.left.toString())
@@ -481,42 +515,35 @@ export default class FeaturePopupTool {
     yLabel.setAttribute('transform', `rotate(-90 ${padding.left - 30} ${padding.top + height / 2})`)
     yLabel.setAttribute('font-size', '12')
     yLabel.setAttribute('fill', '#666')
-    yLabel.textContent = this.getParamDisplayName(param)
+    yLabel.textContent = this.getParamDisplayName(param, unit)
     svg.appendChild(yLabel)
   }
 
   /**
    * 获取带单位的参数显示名
    */
-  getParamDisplayName(param) {
-    const paramUnits = {
-      // 节点参数
-      depth: 'Depth (m)',
-      head: 'Head (m)',
-      lateral_i: 'Lateral inflow (m³/s)',
-      total_i: 'Total inflow (m³/s)',
-      flooding: 'Flooding (m³/s)',
-      ponded_v: 'Ponded volume (m³)',
-
-      // 管段参数
-      rate: 'Flow rate (m³/s)',
-      velocity: 'Velocity (m/s)',
-      volume: 'Volume (m³)',
-      capacity: 'Capacity (m³)',
-
-      // 子汇水区参数
-      rain: 'Rainfall (mm)',
-      runoff: 'Runoff (mm)',
-      infilt: 'Infiltration (mm)',
-      evap: 'Evaporation (mm)',
-      snow: 'Snow (mm)',
-      gw_flow: 'Groundwater flow (mm)',
-      soil_moist: 'Soil moisture (%)',
-
-      // 通用参数
-      pollut: 'Pollutant concentration',
+  getParamDisplayName(param, unit) {
+    const paramNames = {
+      depth: 'Depth',
+      head: 'Head',
+      lateral_i: 'Lateral inflow',
+      total_i: 'Total inflow',
+      flooding: 'Flooding',
+      ponded_v: 'Ponded volume',
+      rate: 'Flow rate',
+      velocity: 'Velocity',
+      volume: 'Volume',
+      capacity: 'Capacity',
+      rain: 'Rainfall',
+      runoff: 'Runoff',
+      infilt: 'Infiltration',
+      evap: 'Evaporation',
+      snow: 'Snow',
+      gw_flow: 'Groundwater flow',
+      soil_moist: 'Soil moisture',
     }
-    return paramUnits[param] || param
+    const name = paramNames[param] || param
+    return unit ? `${name} (${unit})` : name
   }
 
   /**
@@ -525,21 +552,21 @@ export default class FeaturePopupTool {
   getLayerDisplayName(layerName) {
     const nameMap = {
       points: 'Points',
-      '土地': 'Land',
-      '子汇水区': 'Subcatchment',
-      '建筑物': 'Building',
-      '堤坝': 'Dam',
-      '湖泊': 'Lake',
-      '道路': 'Road',
-      '管段': 'Conduit',
-      '管点': 'Junction',
-      '排水口': 'Outfall',
-      '河流': 'River',
-      '子汇水区模拟结果': 'Subcatchment Results',
-      '管段模拟结果': 'Conduit Results',
-      '管点模拟结果': 'Junction Results',
-      '节点模拟结果': 'Node Results',
-      '管线模拟结果': 'Conduit Results',
+      土地: 'Land',
+      子汇水区: 'Subcatchment',
+      建筑物: 'Building',
+      堤坝: 'Dam',
+      湖泊: 'Lake',
+      道路: 'Road',
+      管段: 'Conduit',
+      管点: 'Junction',
+      排水口: 'Outfall',
+      河流: 'River',
+      子汇水区模拟结果: 'Subcatchment Results',
+      管段模拟结果: 'Conduit Results',
+      管点模拟结果: 'Junction Results',
+      节点模拟结果: 'Node Results',
+      管线模拟结果: 'Conduit Results',
     }
     return nameMap[layerName] || layerName
   }
