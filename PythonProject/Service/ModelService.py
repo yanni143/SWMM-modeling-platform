@@ -2,7 +2,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +20,7 @@ from Tools.InpTools.InpParameterEditor import (
     build_parameter_catalog,
     build_simulation_options,
 )
+from Tools.InpTools.InpRainfallEditor import apply_rainfall_options, build_rainfall_options
 from Tools.InpTools.InpParser import INPParser
 from Tools.InpTools.InpValidator import InpValidationResult, validate_inp_file
 
@@ -173,10 +174,12 @@ class ModelService:
 
     def get_parameter_catalog(self, session: Session, version_id: uuid.UUID) -> dict:
         _, validation = self._download_and_validate(session, version_id)
+        simulation_options = build_simulation_options(validation.sections, self.settings)
         return {
             "groups": build_parameter_catalog(validation.sections),
-            "simulation_options": build_simulation_options(
-                validation.sections, self.settings
+            "simulation_options": simulation_options,
+            "rainfall_options": build_rainfall_options(
+                validation.sections, simulation_options["duration_seconds"]
             ),
         }
 
@@ -186,6 +189,7 @@ class ModelService:
         parent_version_id: uuid.UUID,
         changes: list[dict[str, str]],
         simulation_options: Optional[dict[str, int]] = None,
+        rainfall_options: Optional[dict[str, Any]] = None,
         summary: Optional[str] = None,
         created_by: Optional[str] = None,
     ) -> tuple[ModelVersion, list[dict]]:
@@ -208,6 +212,11 @@ class ModelService:
             content, _ = INPFileHandler.read_file(str(source_path))
             if not content:
                 raise ValueError("无法读取父版本 INP")
+            original_sections = INPParser.parse(content)
+            original_simulation = build_simulation_options(original_sections, self.settings)
+            original_rainfall = build_rainfall_options(
+                original_sections, original_simulation["duration_seconds"]
+            )
             adjusted_content = content
             applied = []
             if changes:
@@ -224,6 +233,21 @@ class ModelService:
                     self.settings,
                 )
                 applied.extend(option_changes)
+            parsed_sections = INPParser.parse(adjusted_content)
+            effective_simulation = build_simulation_options(parsed_sections, self.settings)
+            requested_rainfall = rainfall_options or {
+                "start_seconds": original_rainfall["start_seconds"],
+                "end_seconds": original_rainfall["end_seconds"],
+                "return_period": original_rainfall["return_period"],
+            }
+            if rainfall_options or original_rainfall["end_seconds"] > effective_simulation["duration_seconds"]:
+                adjusted_content, rainfall_changes = apply_rainfall_options(
+                    adjusted_content,
+                    parsed_sections,
+                    requested_rainfall,
+                    effective_simulation["duration_seconds"],
+                )
+                applied.extend(rainfall_changes)
             if not applied:
                 raise ValueError("提交的参数没有发生变化")
             message = INPFileHandler.write_file(str(target_path), adjusted_content)

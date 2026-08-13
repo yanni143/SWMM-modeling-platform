@@ -39,7 +39,7 @@ LAT_FLOW_TOL         5
 [RAINGAGES]
 ;Name            Form            Intvl            SCF            Tseries
 ;--------------- --------------- -------------- -------------- --------------
-RG1            INTENSITY            0.01            1.0            TIMESERIES Rainfall01
+RG1            INTENSITY            0:01            1.0            TIMESERIES Rainfall01
 
 [TIMESERIES]
 ;Name                Date                Time                Value

@@ -18,6 +18,11 @@ from Tools.InpTools.InpParameterEditor import (
     build_parameter_catalog,
     build_simulation_options,
 )
+from Tools.InpTools.InpRainfallEditor import (
+    apply_rainfall_options,
+    build_chicago_series,
+    build_rainfall_options,
+)
 from Tools.InpTools.InpValidator import InvalidInpFile, validate_inp_file
 
 
@@ -334,4 +339,70 @@ J1 0 2
                 sections,
                 {"duration_seconds": 7200, "report_step_seconds": 5},
                 self.simulation_settings(),
+            )
+
+    def test_design_rainfall_replaces_only_referenced_time_series(self) -> None:
+        content = """[OPTIONS]
+FLOW_UNITS CFS
+START_DATE 01/01/2025
+START_TIME 00:00:00
+
+[RAINGAGES]
+RG1 INTENSITY 0.01 1.0 TIMESERIES Rainfall01
+
+[TIMESERIES]
+TIDE1 01/01/2025 00:00:00 0.5
+Rainfall01 01/01/2025 00:00:00 0.1
+Rainfall01 01/01/2025 00:01:00 0.2
+
+[JUNCTIONS]
+J1 0 2
+"""
+        from Tools.InpTools.InpParser import INPParser
+
+        sections = INPParser.parse(content)
+        adjusted, changes = apply_rainfall_options(
+            content,
+            sections,
+            {"start_seconds": 600, "end_seconds": 3600, "return_period": "5year"},
+            7200,
+        )
+        self.assertIn("RG1 INTENSITY 0:01 1.0 TIMESERIES Rainfall01", adjusted)
+        self.assertIn("TIDE1 01/01/2025 00:00:00 0.5", adjusted)
+        self.assertIn(";@DESIGN_RAIN return_period=5year start_s=600 end_s=3600", adjusted)
+        self.assertIn("Rainfall01           01/01/2025 00:10:00", adjusted)
+        self.assertNotIn("Rainfall01 01/01/2025 00:01:00 0.2", adjusted)
+        self.assertEqual({item["field"] for item in changes}, {"start_seconds", "end_seconds", "return_period"})
+
+        parsed = INPParser.parse(adjusted)
+        options = build_rainfall_options(parsed, 7200)
+        self.assertEqual(options["start_seconds"], 600)
+        self.assertEqual(options["end_seconds"], 3600)
+        self.assertEqual(options["return_period"], "5year")
+
+    def test_chicago_series_has_dry_periods_and_expected_peak(self) -> None:
+        series = build_chicago_series(600, 4200, "10year", 7200)
+        self.assertEqual(dict(series)[0], 0.0)
+        self.assertEqual(dict(series)[4200], 0.0)
+        wet = [value for offset, value in series if 600 <= offset < 4200]
+        self.assertAlmostEqual(max(wet), 87.6)
+
+    def test_design_rainfall_rejects_end_after_simulation(self) -> None:
+        content = """[OPTIONS]
+FLOW_UNITS CMS
+START_DATE 01/01/2025
+START_TIME 00:00:00
+[RAINGAGES]
+RG1 INTENSITY 0:01 1 TIMESERIES Rainfall01
+[TIMESERIES]
+Rainfall01 01/01/2025 00:00:00 0
+"""
+        from Tools.InpTools.InpParser import INPParser
+
+        with self.assertRaisesRegex(ParameterValidationError, "不能超过模拟时长"):
+            apply_rainfall_options(
+                content,
+                INPParser.parse(content),
+                {"start_seconds": 0, "end_seconds": 7260, "return_period": "3year"},
+                7200,
             )

@@ -18,6 +18,17 @@
 .simulation-projection strong { font: 12px Consolas,monospace; }
 .simulation-projection output { padding: 6px 8px; color: #102a37; border: 1px solid #23748c; background: rgba(104,196,206,.13); font: 12px Consolas,monospace; }
 .simulation-projection em { grid-column: 1 / -1; }
+.rainfall-settings { margin: 8px 0 16px; }
+.rainfall-heading { margin-top: 10px; }
+.rainfall-setting-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(16,42,55,.1); }
+.rainfall-setting-fields label { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.74); }
+.rainfall-setting-fields label:last-child { grid-column: 1 / -1; }
+.rainfall-setting-fields label > span { font-size: 12px; font-weight: 650; }
+.rainfall-setting-fields label > span small { color: #23748c; font-weight: 400; }
+.rainfall-setting-fields label > small { color: #78888d; font-size: 10px; }
+.rainfall-setting-fields input, .rainfall-setting-fields select { box-sizing: border-box; width: 100%; padding: 7px; border: 1px solid #b9c7c7; border-radius: 0; background: #fff; font: 12px Consolas,monospace; outline: none; }
+.rainfall-setting-fields input:focus, .rainfall-setting-fields select:focus { border-color: #23748c; box-shadow: 0 0 0 2px rgba(35,116,140,.1); }
+.rainfall-projection output { white-space: nowrap; }
 .selection-mode { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 8px; border: 1px solid rgba(16,42,55,.18); }
 .selection-mode button { min-height: 32px; color: #607178; border: 0; background: rgba(255,255,255,.68); font: 600 10px inherit; cursor: pointer; }
 .selection-mode button + button { border-left: 1px solid rgba(16,42,55,.18); }
@@ -83,4 +94,4 @@
 .version-created strong { font-size: 14px; }
 .version-created span { color: #c7dfd6; font-size: 9px; }
 .version-created button { padding: 9px 10px; color: #285d50; border: 0; background: white; font: 650 10px inherit; cursor: pointer; }
-@media (max-width: 760px) { .field-grid, .simulation-setting-fields { grid-template-columns: 1fr; } .simulation-projection { grid-template-columns: auto 1fr; } .simulation-projection em { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .field-grid, .simulation-setting-fields, .rainfall-setting-fields { grid-template-columns: 1fr; } .rainfall-setting-fields label:last-child { grid-column: auto; } .simulation-projection { grid-template-columns: auto 1fr; } .simulation-projection em { grid-column: 1 / -1; } }

@@ -22,6 +22,7 @@ from schemas.parameter import (
     CreateAdjustedVersionResponse,
     EditableGroup,
     ParameterCatalogResponse,
+    RainfallOptions,
     SimulationOptions,
 )
 from Service.ModelService import ModelNotFoundError, ModelService, SectionNotFoundError
@@ -124,6 +125,7 @@ def get_editable_parameters(
             simulation_options=SimulationOptions.model_validate(
                 catalog["simulation_options"]
             ),
+            rainfall_options=RainfallOptions.model_validate(catalog["rainfall_options"]),
         )
     except Exception as exc:
         raise translate_service_error(exc) from exc
@@ -147,6 +149,11 @@ def create_adjusted_version(
             simulation_options=(
                 payload.simulation_options.model_dump()
                 if payload.simulation_options
+                else None
+            ),
+            rainfall_options=(
+                payload.rainfall_options.model_dump()
+                if payload.rainfall_options
                 else None
             ),
             summary=payload.summary,

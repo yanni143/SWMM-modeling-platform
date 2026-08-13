@@ -4,8 +4,8 @@
       <div>
         <h3>模拟参数设置</h3>
       </div>
-      <span v-if="simulationOptionsChanged">
-        {{ Number(simulationDurationChanged) + Number(reportStepChanged) }} 项待保存
+      <span v-if="simulationOptionsChanged || rainfallOptionsChanged">
+        {{ Number(simulationDurationChanged) + Number(reportStepChanged) + Number(rainfallOptionsChanged) }} 项待保存
       </span>
     </div>
 
@@ -41,6 +41,30 @@
         <strong>{{ estimatedEndTime }}</strong>
         <output>{{ estimatedOutputSteps }} 个输出点</output>
         <em v-if="store.simulationOptions.require_report_step_divisible">时长须能被输出步长整除</em>
+      </div>
+    </div>
+
+    
+    <div v-if="store.rainfallOptions" class="rainfall-settings">
+      <div class="rainfall-setting-fields">
+        <label>
+          <span>降雨开始 <small>秒</small></span>
+          <input v-model.number="rainStartSeconds" type="number" min="0" :max="durationSeconds" :step="store.rainfallOptions.time_step_seconds" />
+          <small>{{ formatOffset(rainStartSeconds) }}</small>
+        </label>
+        <label>
+          <span>降雨结束 <small>秒</small></span>
+          <input v-model.number="rainEndSeconds" type="number" min="0" :max="durationSeconds" :step="store.rainfallOptions.time_step_seconds" />
+          <small>{{ formatOffset(rainEndSeconds) }}</small>
+        </label>
+        <label>
+          <span>降雨强度</span>
+          <select v-model="rainReturnPeriod">
+            <option v-for="item in store.rainfallOptions.available_return_periods" :key="item.value" :value="item.value">
+              {{ item.label }}（峰值 {{ item.peak_mm_h }} mm/h）
+            </option>
+          </select>
+        </label>
       </div>
     </div>
 
@@ -176,6 +200,13 @@
         <code>{{ reportStepSeconds }} 秒</code>
         <button type="button" aria-label="撤销输出步长修改" @click="resetReportStep">×</button>
       </div>
+      <div v-if="rainfallOptionsChanged" class="change-line">
+        <span>设计降雨</span>
+        <code>{{ rainfallSummary(store.rainfallOptions?.start_seconds, store.rainfallOptions?.end_seconds, store.rainfallOptions?.return_period) }}</code>
+        <i>→</i>
+        <code>{{ rainfallSummary(rainStartSeconds, rainEndSeconds, rainReturnPeriod) }}</code>
+        <button type="button" aria-label="撤销设计降雨修改" @click="resetRainfall">×</button>
+      </div>
       <div v-for="draft in draftsList" :key="draft.key" class="change-line">
         <span>{{ draft.target }} · {{ draft.label }}</span>
         <code>{{ draft.oldValue }}</code>
@@ -184,7 +215,7 @@
         <button type="button" aria-label="撤销该项" @click="removeDraft(draft.key)">×</button>
       </div>
       <input v-model.trim="summary" maxlength="500" placeholder="版本说明，例如：降低管线粗糙度" />
-      <button class="save-version" type="button" :disabled="store.savingVersion || !!simulationError" @click="saveVersion">
+      <button class="save-version" type="button" :disabled="store.savingVersion || !!combinedOptionsError" @click="saveVersion">
         {{ store.savingVersion ? '正在校验并生成…' : `校验并生成 V${nextVersionNumber}` }}
       </button>
     </div>
@@ -232,6 +263,9 @@ const batchOperation = ref<'set' | 'add' | 'percent'>('set')
 const batchAmount = ref('')
 const durationSeconds = ref(0)
 const reportStepSeconds = ref(0)
+const rainStartSeconds = ref(0)
+const rainEndSeconds = ref(0)
+const rainReturnPeriod = ref('')
 
 const groups = computed(() => store.parameterGroups)
 const activeGroup = computed(() => groups.value.find((group) => group.id === selectedGroupId.value))
@@ -267,8 +301,16 @@ const reportStepChanged = computed(
 const simulationOptionsChanged = computed(
   () => simulationDurationChanged.value || reportStepChanged.value,
 )
+const rainfallOptionsChanged = computed(() => {
+  const options = store.rainfallOptions
+  return !!options && (
+    rainStartSeconds.value !== options.start_seconds ||
+    rainEndSeconds.value !== options.end_seconds ||
+    rainReturnPeriod.value !== options.return_period
+  )
+})
 const pendingChangeCount = computed(
-  () => draftsList.value.length + Number(simulationDurationChanged.value) + Number(reportStepChanged.value),
+  () => draftsList.value.length + Number(simulationDurationChanged.value) + Number(reportStepChanged.value) + Number(rainfallOptionsChanged.value),
 )
 const effectiveReportStepMinimum = computed(() =>
   Math.max(
@@ -301,7 +343,18 @@ const simulationError = computed(() => {
   if (Math.floor(duration / reportStep) > options.max_output_steps) return `输出时间点不能超过 ${options.max_output_steps} 个`
   return ''
 })
-const displayError = computed(() => localError.value || simulationError.value)
+const rainfallError = computed(() => {
+  const options = store.rainfallOptions
+  if (!options) return ''
+  if (!Number.isInteger(rainStartSeconds.value) || !Number.isInteger(rainEndSeconds.value)) return '降雨开始和结束时间必须是整数秒'
+  if (rainStartSeconds.value < 0 || rainStartSeconds.value >= rainEndSeconds.value) return '降雨时间必须满足 0 ≤ 开始时间 < 结束时间'
+  if (rainEndSeconds.value > durationSeconds.value) return '降雨结束时间不能超过模拟时长'
+  if (rainStartSeconds.value % options.time_step_seconds || rainEndSeconds.value % options.time_step_seconds) return `降雨开始和结束时间必须是 ${options.time_step_seconds} 秒的整数倍`
+  if (!options.available_return_periods.some((item) => item.value === rainReturnPeriod.value)) return '请选择有效的降雨强度'
+  return ''
+})
+const combinedOptionsError = computed(() => simulationError.value || rainfallError.value)
+const displayError = computed(() => localError.value || combinedOptionsError.value)
 const nextVersionNumber = computed(() => Math.max(...store.versions.map((item) => item.version), 0) + 1)
 
 watch(
@@ -309,6 +362,16 @@ watch(
   (options) => {
     durationSeconds.value = options?.duration_seconds || 0
     reportStepSeconds.value = options?.report_step_seconds || 0
+  },
+  { immediate: true },
+)
+
+watch(
+  () => store.rainfallOptions,
+  (options) => {
+    rainStartSeconds.value = options?.start_seconds || 0
+    rainEndSeconds.value = options?.end_seconds || 0
+    rainReturnPeriod.value = options?.return_period || ''
   },
   { immediate: true },
 )
@@ -479,6 +542,7 @@ function clearDrafts() {
   localError.value = ''
   resetDuration()
   resetReportStep()
+  resetRainfall()
 }
 
 function resetDuration() {
@@ -487,6 +551,27 @@ function resetDuration() {
 
 function resetReportStep() {
   reportStepSeconds.value = store.simulationOptions?.report_step_seconds || 0
+}
+
+function resetRainfall() {
+  rainStartSeconds.value = store.rainfallOptions?.start_seconds || 0
+  rainEndSeconds.value = store.rainfallOptions?.end_seconds || 0
+  rainReturnPeriod.value = store.rainfallOptions?.return_period || ''
+}
+
+function formatOffset(value: number) {
+  if (!Number.isFinite(value)) return '—'
+  const seconds = Math.max(0, Math.round(value))
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const remainder = seconds % 60
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
+}
+
+function rainfallSummary(start?: number, end?: number, returnPeriod?: string) {
+  if (start === undefined || end === undefined || !returnPeriod) return '—'
+  const label = store.rainfallOptions?.available_return_periods.find((item) => item.value === returnPeriod)?.label || returnPeriod
+  return `${formatOffset(start)}–${formatOffset(end)} · ${label}`
 }
 
 function formatDateTime(value: string) {
@@ -502,7 +587,7 @@ function parseSimulationDate(value: string) {
 
 async function saveVersion() {
   const parentId = store.selectedVersionId
-  if (!parentId || simulationError.value) return
+  if (!parentId || combinedOptionsError.value) return
   const result = await store.saveAdjustedVersion(
     draftsList.value.map((draft) => ({
       section: draft.section,
@@ -515,6 +600,13 @@ async function saveVersion() {
       ? {
           duration_seconds: durationSeconds.value,
           report_step_seconds: reportStepSeconds.value,
+        }
+      : undefined,
+    rainfallOptionsChanged.value
+      ? {
+          start_seconds: rainStartSeconds.value,
+          end_seconds: rainEndSeconds.value,
+          return_period: rainReturnPeriod.value,
         }
       : undefined,
   )

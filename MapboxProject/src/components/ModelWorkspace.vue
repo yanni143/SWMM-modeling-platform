@@ -5,16 +5,15 @@
         <p class="workspace-kicker">FIXED STUDY AREA / 01</p>
         <h2>{{ store.selectedModel?.name || '模型工作台' }}</h2>
       </div>
-      <span class="system-state"><i></i> INP READY</span>
+      <div class="workspace-status">
+        <span class="system-state"><i></i> INP READY</span>
+        <button type="button" @click="store.loadModels()">刷新</button>
+      </div>
     </div>
 
     <p v-if="store.error" class="error-message" role="alert">{{ store.error }}</p>
 
     <section v-if="store.selectedModel" class="study-area-summary">
-      <div class="section-title">
-        <span>固定研究区</span>
-        <button type="button" @click="store.loadModels()">刷新</button>
-      </div>
       <div class="model-facts">
         <div><span>状态</span><strong>已就绪</strong></div>
         <div><span>版本数</span><strong>{{ store.selectedModel.version_count }}</strong></div>

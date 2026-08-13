@@ -44,10 +44,27 @@ class SimulationOptions(BaseModel):
     require_report_step_divisible: bool
 
 
+class RainfallReturnPeriod(BaseModel):
+    value: str
+    label: str
+    peak_mm_h: float
+
+
+class RainfallOptions(BaseModel):
+    start_seconds: int
+    end_seconds: int
+    return_period: str
+    gage_name: str
+    series_name: str
+    time_step_seconds: int
+    available_return_periods: list[RainfallReturnPeriod]
+
+
 class ParameterCatalogResponse(BaseModel):
     version_id: UUID
     groups: list[EditableGroup]
     simulation_options: SimulationOptions
+    rainfall_options: RainfallOptions
 
 
 class ParameterChangeInput(BaseModel):
@@ -62,15 +79,22 @@ class SimulationOptionsInput(BaseModel):
     report_step_seconds: int = Field(strict=True)
 
 
+class RainfallOptionsInput(BaseModel):
+    start_seconds: int = Field(strict=True, ge=0)
+    end_seconds: int = Field(strict=True, gt=0)
+    return_period: str = Field(min_length=1, max_length=32)
+
+
 class CreateAdjustedVersionRequest(BaseModel):
     summary: Optional[str] = Field(default=None, max_length=500)
     created_by: Optional[str] = Field(default=None, max_length=100)
     changes: list[ParameterChangeInput] = Field(default_factory=list, max_length=5000)
     simulation_options: Optional[SimulationOptionsInput] = None
+    rainfall_options: Optional[RainfallOptionsInput] = None
 
     @model_validator(mode="after")
     def require_changes(self):
-        if not self.changes and self.simulation_options is None:
+        if not self.changes and self.simulation_options is None and self.rainfall_options is None:
             raise ValueError("至少需要提交一项参数修改")
         return self
 

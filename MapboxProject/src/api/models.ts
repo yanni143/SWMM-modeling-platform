@@ -146,14 +146,37 @@ export interface SimulationOptions {
   require_report_step_divisible: boolean
 }
 
+export interface RainfallReturnPeriod {
+  value: string
+  label: string
+  peak_mm_h: number
+}
+
+export interface RainfallOptions {
+  start_seconds: number
+  end_seconds: number
+  return_period: string
+  gage_name: string
+  series_name: string
+  time_step_seconds: number
+  available_return_periods: RainfallReturnPeriod[]
+}
+
 export interface EditableParametersResponse {
   groups: EditableGroup[]
   simulation_options: SimulationOptions
+  rainfall_options: RainfallOptions
 }
 
 export interface SimulationOptionsInput {
   duration_seconds: number
   report_step_seconds: number
+}
+
+export interface RainfallOptionsInput {
+  start_seconds: number
+  end_seconds: number
+  return_period: string
 }
 
 export interface ParameterChangeInput {
@@ -248,10 +271,16 @@ export function createAdjustedVersion(
   changes: ParameterChangeInput[],
   summary?: string,
   simulationOptions?: SimulationOptionsInput,
+  rainfallOptions?: RainfallOptionsInput,
 ): Promise<AdjustedVersionResponse> {
   return request(`/api/model-versions/${versionId}/versions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ changes, summary, simulation_options: simulationOptions }),
+    body: JSON.stringify({
+      changes,
+      summary,
+      simulation_options: simulationOptions,
+      rainfall_options: rainfallOptions,
+    }),
   })
 }

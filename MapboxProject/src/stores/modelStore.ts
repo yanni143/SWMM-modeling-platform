@@ -17,6 +17,8 @@ import {
   type ParameterChangeInput,
   type SimulationOptions,
   type SimulationOptionsInput,
+  type RainfallOptions,
+  type RainfallOptionsInput,
 } from '@/api/models'
 import {
   clearWorkspaceState,
@@ -37,6 +39,7 @@ interface ModelState {
   savingVersion: boolean
   parameterGroups: EditableGroup[]
   simulationOptions: SimulationOptions | null
+  rainfallOptions: RainfallOptions | null
   availableResults: ModelResultSummary[]
   activeResultVersionId: string | null
   error: string | null
@@ -56,6 +59,7 @@ export const useModelStore = defineStore('model-library', {
     savingVersion: false,
     parameterGroups: [],
     simulationOptions: null,
+    rainfallOptions: null,
     availableResults: [],
     activeResultVersionId: null,
     error: null,
@@ -116,6 +120,7 @@ export const useModelStore = defineStore('model-library', {
         const editableParameters = await fetchEditableParameters(versionId)
         this.parameterGroups = editableParameters.groups
         this.simulationOptions = editableParameters.simulation_options
+        this.rainfallOptions = editableParameters.rainfall_options
         saveWorkspaceState({ selectedVersionId: versionId })
       } catch (error) {
         this.error = error instanceof Error ? error.message : 'INP 分区读取失败'
@@ -184,6 +189,7 @@ export const useModelStore = defineStore('model-library', {
       changes: ParameterChangeInput[],
       summary?: string,
       simulationOptions?: SimulationOptionsInput,
+      rainfallOptions?: RainfallOptionsInput,
     ) {
       if (!this.selectedVersionId || !this.selectedModelId) return null
       const parentVersionId = this.selectedVersionId
@@ -195,6 +201,7 @@ export const useModelStore = defineStore('model-library', {
           changes,
           summary,
           simulationOptions,
+          rainfallOptions,
         )
         this.versions = await fetchVersions(this.selectedModelId)
         await this.selectVersion(result.version.id)
