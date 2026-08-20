@@ -146,20 +146,17 @@ export interface SimulationOptions {
   require_report_step_divisible: boolean
 }
 
-export interface RainfallReturnPeriod {
-  value: string
-  label: string
-  peak_mm_h: number
-}
-
 export interface RainfallOptions {
   start_seconds: number
+  duration_seconds: number
   end_seconds: number
-  return_period: string
+  total_rainfall_mm: number
+  peak_rainfall_mm_h: number
   gage_name: string
   series_name: string
   time_step_seconds: number
-  available_return_periods: RainfallReturnPeriod[]
+  peak_ratio: number
+  formula: string
 }
 
 export interface EditableParametersResponse {
@@ -175,8 +172,8 @@ export interface SimulationOptionsInput {
 
 export interface RainfallOptionsInput {
   start_seconds: number
-  end_seconds: number
-  return_period: string
+  duration_seconds: number
+  total_rainfall_mm: number
 }
 
 export interface ParameterChangeInput {

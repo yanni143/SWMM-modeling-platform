@@ -237,10 +237,12 @@ class ModelService:
             effective_simulation = build_simulation_options(parsed_sections, self.settings)
             requested_rainfall = rainfall_options or {
                 "start_seconds": original_rainfall["start_seconds"],
-                "end_seconds": original_rainfall["end_seconds"],
-                "return_period": original_rainfall["return_period"],
+                "duration_seconds": original_rainfall["duration_seconds"],
+                "total_rainfall_mm": original_rainfall["total_rainfall_mm"],
             }
-            if rainfall_options or original_rainfall["end_seconds"] > effective_simulation["duration_seconds"]:
+            if rainfall_options or (
+                original_rainfall["end_seconds"] > effective_simulation["duration_seconds"]
+            ):
                 adjusted_content, rainfall_changes = apply_rainfall_options(
                     adjusted_content,
                     parsed_sections,

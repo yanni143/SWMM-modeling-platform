@@ -490,16 +490,15 @@ section 名称在服务中会转换为大写。
   },
   "rainfall_options": {
     "start_seconds": 0,
+    "duration_seconds": 7200,
     "end_seconds": 7200,
-    "return_period": "3year",
+    "total_rainfall_mm": 120.0,
+    "peak_rainfall_mm_h": 207.48,
     "gage_name": "RG1",
     "series_name": "Rainfall01",
     "time_step_seconds": 60,
-    "available_return_periods": [
-      {"value": "3year", "label": "三年一遇", "peak_mm_h": 60.0},
-      {"value": "5year", "label": "五年一遇", "peak_mm_h": 71.4},
-      {"value": "10year", "label": "十年一遇", "peak_mm_h": 87.6}
-    ]
+    "peak_ratio": 0.43,
+    "formula": "haikou_chicago"
   }
 }
 ```
@@ -528,14 +527,17 @@ section 名称在服务中会转换为大写。
 | `simulation_options.report_step_seconds` | integer | 结果输出步长，单位秒 |
 | `simulation_options.routing_step_seconds` | number | 当前路由步长，单位秒，只读 |
 | `rainfall_options.start_seconds` | integer | 相对模拟开始时刻的起雨时间，单位秒 |
-| `rainfall_options.end_seconds` | integer | 相对模拟开始时刻的停雨时间，单位秒 |
-| `rainfall_options.return_period` | string | 当前设计降雨重现期档位 |
+| `rainfall_options.duration_seconds` | integer | 降雨持续时间，单位秒 |
+| `rainfall_options.end_seconds` | integer | 后端根据开始时间和时长计算的停雨时间，单位秒 |
+| `rainfall_options.total_rainfall_mm` | number | 总降雨量，单位 mm |
+| `rainfall_options.peak_rainfall_mm_h` | number | 生成曲线的峰值雨强，单位 mm/h，只读 |
 | `rainfall_options.gage_name` | string | `[RAINGAGES]` 中使用该时间序列的雨量计名称 |
 | `rainfall_options.series_name` | string | 被替换的 `[TIMESERIES]` 时间序列名称 |
 | `rainfall_options.time_step_seconds` | integer | 设计降雨生成步长，当前为 60 秒 |
-| `rainfall_options.available_return_periods` | array | 后端允许的重现期及其峰值雨强，峰值单位 mm/h |
+| `rainfall_options.peak_ratio` | number | 峰现系数，当前为 0.43 |
+| `rainfall_options.formula` | string | 设计降雨公式标识 |
 
-对于尚未写入设计降雨元数据的基线版本，后端会根据现有降雨时间序列的非零范围和峰值推断初始设置；新创建的设计降雨版本会在 INP 中写入 `;@DESIGN_RAIN` 注释以便准确回显。
+后端仅解析带有 `schema=2` 的 `;@DESIGN_RAIN` 注释。没有该标记的旧注释和没有注释的基线版本，都会根据现有降雨时间序列的非零范围、累计雨量和峰值推算当前设置；新创建的设计降雨版本会写入 `schema=2` 元数据以便准确回显。
 
 ### 6.8 创建调参版本
 
@@ -555,7 +557,7 @@ Content-Type: application/json
 
 ```json
 {
-  "summary": "调整不透水率、模拟时长和五年一遇设计降雨",
+  "summary": "调整不透水率、模拟时长和设计降雨",
   "created_by": "demo-user",
   "changes": [
     {
@@ -577,8 +579,8 @@ Content-Type: application/json
   },
   "rainfall_options": {
     "start_seconds": 600,
-    "end_seconds": 5400,
-    "return_period": "5year"
+    "duration_seconds": 4800,
+    "total_rainfall_mm": 120.0
   }
 }
 ```
@@ -599,17 +601,20 @@ Content-Type: application/json
 | `simulation_options.report_step_seconds` | 是 | 严格整数，不小于路由步长、不大于模拟时长，并满足最大输出点约束 |
 | `rainfall_options` | 条件必填 | 对象或 `null`；提供时必须同时包含以下三个字段 |
 | `rainfall_options.start_seconds` | 是 | 严格整数且不小于 0，必须为 60 秒的整数倍 |
-| `rainfall_options.end_seconds` | 是 | 严格正整数，必须为 60 秒的整数倍且不超过本次有效模拟时长 |
-| `rainfall_options.return_period` | 是 | `3year`、`5year` 或 `10year` |
+| `rainfall_options.duration_seconds` | 是 | 严格正整数，必须为 60 秒的整数倍 |
+| `rainfall_options.total_rainfall_mm` | 是 | 严格正数且为有限值，单位 mm |
 
 设计降雨生成和写入规则：
 
-- 后端采用峰现系数 `0.43`、指数 `0.70`、修正项 `7 min` 的芝加哥雨型。
+- 后端采用海口地方暴雨强度公式、峰现系数 `0.43` 的标准芝加哥雨型。
+- 公式参数为 `A=2795.883`、`C=0.490`、`b=19.757 min`、`n=0.642`；公式计算使用分钟和 `L/(s·ha)`，写入前转换为 `mm/h` 或英制 `in/h`。
+- 标准曲线使用内部参考重现期 `p_ref=1`，最终幅度由 `total_rainfall_mm` 缩放确定。
+- 后端先生成标准曲线，再按离散累计雨量缩放到 `total_rainfall_mm`。
 - 起雨前与停雨后的时间点写入 0；降雨区间按 60 秒步长生成。
 - 后端根据 `[RAINGAGES]` 的 `TIMESERIES` 引用定位目标名称，只替换该名称在 `[TIMESERIES]` 中的记录，其他时间序列保持不变。
 - 雨量计记录间隔同步为 `0:01`。英制流量模型写入前会将 mm/h 转换为 in/h。
 - 第一版要求所有使用内嵌时间序列的雨量计引用同一个降雨时间序列；否则返回 `422`。
-- 同时修改模拟时长和降雨时，以修改后的模拟时长校验降雨结束时间；仅缩短模拟时长而使原降雨越界时也会拒绝创建版本。
+- `end_seconds` 由 `start_seconds + duration_seconds` 计算；同时修改模拟时长和降雨时，以修改后的模拟时长校验降雨结束时间。
 
 响应：`201 Created`。
 
@@ -972,8 +977,8 @@ curl -X POST \
     ],
     "rainfall_options": {
       "start_seconds": 600,
-      "end_seconds": 5400,
-      "return_period": "5year"
+      "duration_seconds": 4800,
+      "total_rainfall_mm": 120.0
     }
   }'
 ```

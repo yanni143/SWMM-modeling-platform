@@ -363,30 +363,83 @@ J1 0 2
         adjusted, changes = apply_rainfall_options(
             content,
             sections,
-            {"start_seconds": 600, "end_seconds": 3600, "return_period": "5year"},
+            {"start_seconds": 600, "duration_seconds": 3000, "total_rainfall_mm": 120.0},
             7200,
         )
         self.assertIn("RG1 INTENSITY 0:01 1.0 TIMESERIES Rainfall01", adjusted)
         self.assertIn("TIDE1 01/01/2025 00:00:00 0.5", adjusted)
-        self.assertIn(";@DESIGN_RAIN return_period=5year start_s=600 end_s=3600", adjusted)
+        self.assertIn(
+            ";@DESIGN_RAIN schema=2 formula=haikou_chicago start_s=600 "
+            "duration_s=3000 total_mm=120",
+            adjusted,
+        )
         self.assertIn("Rainfall01           01/01/2025 00:10:00", adjusted)
         self.assertNotIn("Rainfall01 01/01/2025 00:01:00 0.2", adjusted)
-        self.assertEqual({item["field"] for item in changes}, {"start_seconds", "end_seconds", "return_period"})
+        self.assertEqual(
+            {item["field"] for item in changes},
+            {"start_seconds", "duration_seconds", "total_rainfall_mm"},
+        )
 
         parsed = INPParser.parse(adjusted)
         options = build_rainfall_options(parsed, 7200)
         self.assertEqual(options["start_seconds"], 600)
+        self.assertEqual(options["duration_seconds"], 3000)
         self.assertEqual(options["end_seconds"], 3600)
-        self.assertEqual(options["return_period"], "5year")
+        self.assertAlmostEqual(options["total_rainfall_mm"], 120.0)
+        self.assertEqual(options["formula"], "haikou_chicago")
 
     def test_chicago_series_has_dry_periods_and_expected_peak(self) -> None:
-        series = build_chicago_series(600, 4200, "10year", 7200)
+        series = build_chicago_series(600, 3600, 120.0, 7200)
         self.assertEqual(dict(series)[0], 0.0)
         self.assertEqual(dict(series)[4200], 0.0)
         wet = [value for offset, value in series if 600 <= offset < 4200]
-        self.assertAlmostEqual(max(wet), 87.6)
+        depth = sum(value for value in wet) * 60.0 / 3600.0
+        self.assertAlmostEqual(depth, 120.0, places=8)
+        peak_offset = max(
+            (offset for offset, value in series if 600 <= offset < 4200),
+            key=lambda offset: dict(series)[offset],
+        )
+        self.assertLessEqual(abs(peak_offset - (600 + int(0.43 * 3600))), 60)
+        self.assertGreater(max(wet), 0.0)
 
-    def test_design_rainfall_rejects_end_after_simulation(self) -> None:
+    def test_design_rainfall_ignores_metadata_without_schema_2(self) -> None:
+        content = """[OPTIONS]
+FLOW_UNITS CMS
+START_DATE 01/01/2025
+START_TIME 00:00:00
+[RAINGAGES]
+RG1 INTENSITY 0:01 1 TIMESERIES Rainfall01
+[TIMESERIES]
+;@DESIGN_RAIN return_period=5year start_s=600 end_s=3600 dt_s=60
+Rainfall01 01/01/2025 00:10:00 12
+Rainfall01 01/01/2025 00:11:00 18
+"""
+        from Tools.InpTools.InpParser import INPParser
+
+        options = build_rainfall_options(INPParser.parse(content), 7200)
+
+        self.assertEqual(options["start_seconds"], 600)
+        self.assertEqual(options["duration_seconds"], 120)
+        self.assertAlmostEqual(options["total_rainfall_mm"], 0.5)
+        self.assertEqual(options["formula"], "existing_timeseries")
+
+    def test_design_rainfall_rejects_invalid_schema_2_metadata(self) -> None:
+        content = """[OPTIONS]
+FLOW_UNITS CMS
+START_DATE 01/01/2025
+START_TIME 00:00:00
+[RAINGAGES]
+RG1 INTENSITY 0:01 1 TIMESERIES Rainfall01
+[TIMESERIES]
+;@DESIGN_RAIN schema=2 start_s=600 duration_s=120
+Rainfall01 01/01/2025 00:10:00 12
+"""
+        from Tools.InpTools.InpParser import INPParser
+
+        with self.assertRaisesRegex(ParameterValidationError, "元数据格式无效"):
+            build_rainfall_options(INPParser.parse(content), 7200)
+
+    def test_design_rainfall_rejects_duration_after_simulation(self) -> None:
         content = """[OPTIONS]
 FLOW_UNITS CMS
 START_DATE 01/01/2025
@@ -402,6 +455,6 @@ Rainfall01 01/01/2025 00:00:00 0
             apply_rainfall_options(
                 content,
                 INPParser.parse(content),
-                {"start_seconds": 0, "end_seconds": 7260, "return_period": "3year"},
+                {"start_seconds": 0, "duration_seconds": 7260, "total_rainfall_mm": 120.0},
                 7200,
             )

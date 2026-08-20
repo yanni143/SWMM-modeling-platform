@@ -53,18 +53,20 @@
           <small>{{ formatOffset(rainStartSeconds) }}</small>
         </label>
         <label>
-          <span>降雨结束 <small>秒</small></span>
-          <input v-model.number="rainEndSeconds" type="number" min="0" :max="durationSeconds" :step="store.rainfallOptions.time_step_seconds" />
-          <small>{{ formatOffset(rainEndSeconds) }}</small>
+          <span>降雨时长 <small>秒</small></span>
+          <input v-model.number="rainDurationSeconds" type="number" min="0" :max="Math.max(0, durationSeconds - rainStartSeconds)" :step="store.rainfallOptions.time_step_seconds" />
+          <small>{{ formatOffset(rainDurationSeconds) }}</small>
         </label>
         <label>
-          <span>降雨强度</span>
-          <select v-model="rainReturnPeriod">
-            <option v-for="item in store.rainfallOptions.available_return_periods" :key="item.value" :value="item.value">
-              {{ item.label }}（峰值 {{ item.peak_mm_h }} mm/h）
-            </option>
-          </select>
+          <span>总降雨量 <small>mm</small></span>
+          <input v-model.number="rainTotalRainfallMm" type="number" min="0" step="0.1" />
+          <small>当前峰值 {{ store.rainfallOptions.peak_rainfall_mm_h.toFixed(2) }} mm/h</small>
         </label>
+        <div class="rainfall-derived">
+          <span>降雨结束</span>
+          <strong>{{ formatOffset(rainStartSeconds + rainDurationSeconds) }}</strong>
+          <small>峰现系数 {{ store.rainfallOptions.peak_ratio }}</small>
+        </div>
       </div>
     </div>
 
@@ -200,9 +202,9 @@
       </div>
       <div v-if="rainfallOptionsChanged" class="change-line">
         <span>设计降雨</span>
-        <code>{{ rainfallSummary(store.rainfallOptions?.start_seconds, store.rainfallOptions?.end_seconds, store.rainfallOptions?.return_period) }}</code>
+        <code>{{ rainfallSummary(store.rainfallOptions?.start_seconds, store.rainfallOptions?.duration_seconds, store.rainfallOptions?.total_rainfall_mm) }}</code>
         <i>→</i>
-        <code>{{ rainfallSummary(rainStartSeconds, rainEndSeconds, rainReturnPeriod) }}</code>
+        <code>{{ rainfallSummary(rainStartSeconds, rainDurationSeconds, rainTotalRainfallMm) }}</code>
         <button type="button" aria-label="撤销设计降雨修改" @click="resetRainfall">×</button>
       </div>
       <div v-for="draft in draftsList" :key="draft.key" class="change-line">
@@ -262,8 +264,8 @@ const batchAmount = ref('')
 const durationSeconds = ref(0)
 const reportStepSeconds = ref(0)
 const rainStartSeconds = ref(0)
-const rainEndSeconds = ref(0)
-const rainReturnPeriod = ref('')
+const rainDurationSeconds = ref(0)
+const rainTotalRainfallMm = ref(0)
 
 const groups = computed(() => store.parameterGroups)
 const activeGroup = computed(() => groups.value.find((group) => group.id === selectedGroupId.value))
@@ -303,8 +305,8 @@ const rainfallOptionsChanged = computed(() => {
   const options = store.rainfallOptions
   return !!options && (
     rainStartSeconds.value !== options.start_seconds ||
-    rainEndSeconds.value !== options.end_seconds ||
-    rainReturnPeriod.value !== options.return_period
+    rainDurationSeconds.value !== options.duration_seconds ||
+    rainTotalRainfallMm.value !== options.total_rainfall_mm
   )
 })
 const pendingChangeCount = computed(
@@ -344,11 +346,11 @@ const simulationError = computed(() => {
 const rainfallError = computed(() => {
   const options = store.rainfallOptions
   if (!options) return ''
-  if (!Number.isInteger(rainStartSeconds.value) || !Number.isInteger(rainEndSeconds.value)) return '降雨开始和结束时间必须是整数秒'
-  if (rainStartSeconds.value < 0 || rainStartSeconds.value >= rainEndSeconds.value) return '降雨时间必须满足 0 ≤ 开始时间 < 结束时间'
-  if (rainEndSeconds.value > durationSeconds.value) return '降雨结束时间不能超过模拟时长'
-  if (rainStartSeconds.value % options.time_step_seconds || rainEndSeconds.value % options.time_step_seconds) return `降雨开始和结束时间必须是 ${options.time_step_seconds} 秒的整数倍`
-  if (!options.available_return_periods.some((item) => item.value === rainReturnPeriod.value)) return '请选择有效的降雨强度'
+  if (!Number.isInteger(rainStartSeconds.value) || !Number.isInteger(rainDurationSeconds.value)) return '降雨开始时间和时长必须是整数秒'
+  if (rainStartSeconds.value < 0 || rainDurationSeconds.value <= 0) return '降雨开始时间必须不小于 0，降雨时长必须大于 0'
+  if (rainStartSeconds.value + rainDurationSeconds.value > durationSeconds.value) return '降雨结束时间不能超过模拟时长'
+  if (rainStartSeconds.value % options.time_step_seconds || rainDurationSeconds.value % options.time_step_seconds) return `降雨开始时间和时长必须是 ${options.time_step_seconds} 秒的整数倍`
+  if (!Number.isFinite(rainTotalRainfallMm.value) || rainTotalRainfallMm.value <= 0) return '总降雨量必须是大于 0 的有效数值'
   return ''
 })
 const combinedOptionsError = computed(() => simulationError.value || rainfallError.value)
@@ -368,8 +370,8 @@ watch(
   () => store.rainfallOptions,
   (options) => {
     rainStartSeconds.value = options?.start_seconds || 0
-    rainEndSeconds.value = options?.end_seconds || 0
-    rainReturnPeriod.value = options?.return_period || ''
+    rainDurationSeconds.value = options?.duration_seconds || 0
+    rainTotalRainfallMm.value = options?.total_rainfall_mm || 0
   },
   { immediate: true },
 )
@@ -553,8 +555,8 @@ function resetReportStep() {
 
 function resetRainfall() {
   rainStartSeconds.value = store.rainfallOptions?.start_seconds || 0
-  rainEndSeconds.value = store.rainfallOptions?.end_seconds || 0
-  rainReturnPeriod.value = store.rainfallOptions?.return_period || ''
+  rainDurationSeconds.value = store.rainfallOptions?.duration_seconds || 0
+  rainTotalRainfallMm.value = store.rainfallOptions?.total_rainfall_mm || 0
 }
 
 function formatOffset(value: number) {
@@ -566,10 +568,9 @@ function formatOffset(value: number) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
 }
 
-function rainfallSummary(start?: number, end?: number, returnPeriod?: string) {
-  if (start === undefined || end === undefined || !returnPeriod) return '—'
-  const label = store.rainfallOptions?.available_return_periods.find((item) => item.value === returnPeriod)?.label || returnPeriod
-  return `${formatOffset(start)}–${formatOffset(end)} · ${label}`
+function rainfallSummary(start?: number, duration?: number, totalRainfall?: number) {
+  if (start === undefined || duration === undefined || totalRainfall === undefined) return '—'
+  return `${formatOffset(start)}–${formatOffset(start + duration)} · ${totalRainfall} mm`
 }
 
 function formatDateTime(value: string) {
@@ -603,8 +604,8 @@ async function saveVersion() {
     rainfallOptionsChanged.value
       ? {
           start_seconds: rainStartSeconds.value,
-          end_seconds: rainEndSeconds.value,
-          return_period: rainReturnPeriod.value,
+          duration_seconds: rainDurationSeconds.value,
+          total_rainfall_mm: rainTotalRainfallMm.value,
         }
       : undefined,
   )

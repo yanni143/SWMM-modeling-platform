@@ -44,20 +44,17 @@ class SimulationOptions(BaseModel):
     require_report_step_divisible: bool
 
 
-class RainfallReturnPeriod(BaseModel):
-    value: str
-    label: str
-    peak_mm_h: float
-
-
 class RainfallOptions(BaseModel):
     start_seconds: int
+    duration_seconds: int
     end_seconds: int
-    return_period: str
+    total_rainfall_mm: float
+    peak_rainfall_mm_h: float
     gage_name: str
     series_name: str
     time_step_seconds: int
-    available_return_periods: list[RainfallReturnPeriod]
+    peak_ratio: float
+    formula: str
 
 
 class ParameterCatalogResponse(BaseModel):
@@ -81,8 +78,8 @@ class SimulationOptionsInput(BaseModel):
 
 class RainfallOptionsInput(BaseModel):
     start_seconds: int = Field(strict=True, ge=0)
-    end_seconds: int = Field(strict=True, gt=0)
-    return_period: str = Field(min_length=1, max_length=32)
+    duration_seconds: int = Field(strict=True, gt=0)
+    total_rainfall_mm: float = Field(strict=True, gt=0, allow_inf_nan=False)
 
 
 class CreateAdjustedVersionRequest(BaseModel):

@@ -25,6 +25,9 @@
 .rainfall-setting-fields label > span { font-size: 12px; font-weight: 650; }
 .rainfall-setting-fields label > span small { color: #23748c; font-weight: 400; }
 .rainfall-setting-fields label > small { color: #78888d; font-size: 10px; }
+.rainfall-derived { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.74); }
+.rainfall-derived span, .rainfall-derived small { color: #78888d; font-size: 10px; }
+.rainfall-derived strong { color: #102a37; font: 12px Consolas,monospace; }
 .rainfall-setting-fields input, .rainfall-setting-fields select { box-sizing: border-box; width: 100%; padding: 7px; border: 1px solid #b9c7c7; border-radius: 0; background: #fff; font: 12px Consolas,monospace; outline: none; }
 .rainfall-setting-fields input:focus, .rainfall-setting-fields select:focus { border-color: #23748c; box-shadow: 0 0 0 2px rgba(35,116,140,.1); }
 .rainfall-projection output { white-space: nowrap; }

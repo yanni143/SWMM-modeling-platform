@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -6,16 +7,15 @@ from Tools.InpTools.InpParameterEditor import ParameterValidationError
 
 
 CHICAGO_R = 0.43
-IDF_N = 0.70
-IDF_B_MIN = 7.0
+HAIKOU_A = 2795.883
+HAIKOU_C = 0.490
+HAIKOU_B_MIN = 19.757
+HAIKOU_N = 0.642
+REFERENCE_RETURN_PERIOD = 1.0
+MM_H_PER_LPS_HA = 0.36
 DT_SECONDS = 60
 DESIGN_RAIN_MARKER = ";@DESIGN_RAIN"
-
-RETURN_PERIODS: dict[str, dict[str, Any]] = {
-    "3year": {"label": "三年一遇", "peak_mm_h": 60.0},
-    "5year": {"label": "五年一遇", "peak_mm_h": 71.4},
-    "10year": {"label": "十年一遇", "peak_mm_h": 87.6},
-}
+DESIGN_RAIN_FORMULA = "haikou_chicago"
 
 
 def _records(lines: list[str]) -> list[list[str]]:
@@ -61,7 +61,9 @@ def _metadata(sections: dict[str, list[str]]) -> dict[str, str] | None:
         stripped = line.strip()
         if not stripped.startswith(DESIGN_RAIN_MARKER):
             continue
-        return dict(re.findall(r"(\w+)=([^\s]+)", stripped))
+        metadata = dict(re.findall(r"(\w+)=([^\s]+)", stripped))
+        if metadata.get("schema") == "2":
+            return metadata
     return None
 
 
@@ -103,21 +105,25 @@ def _infer_existing_options(
         values.append((max(0, int((stamp - start).total_seconds())), value))
     nonzero = [(offset, value) for offset, value in values if value > 0]
     if not nonzero:
-        rain_start, rain_end, peak_model = 0, simulation_duration, 0.0
+        rain_start, rain_end, peak_model, total_mm = 0, simulation_duration, 0.0, 0.0
     else:
         rain_start = nonzero[0][0]
         rain_end = min(simulation_duration, nonzero[-1][0] + DT_SECONDS)
         peak_model = max(value for _, value in nonzero)
     flow_units = _option(sections, "FLOW_UNITS").upper()
-    peak_mm_h = peak_model * 25.4 if flow_units in {"CFS", "GPM", "MGD"} else peak_model
-    return_period = min(
-        RETURN_PERIODS,
-        key=lambda item: abs(RETURN_PERIODS[item]["peak_mm_h"] - peak_mm_h),
-    )
+    imperial = flow_units in {"CFS", "GPM", "MGD"}
+    conversion = 25.4 if imperial else 1.0
+    if nonzero:
+        total_mm = sum(value * conversion for _, value in nonzero) * DT_SECONDS / 3600.0
+    peak_mm_h = peak_model * conversion
     return {
         "start_seconds": rain_start,
+        "duration_seconds": rain_end - rain_start,
         "end_seconds": rain_end,
-        "return_period": return_period,
+        "total_rainfall_mm": total_mm,
+        "peak_rainfall_mm_h": peak_mm_h,
+        "peak_ratio": CHICAGO_R,
+        "formula": "existing_timeseries",
     }
 
 
@@ -128,10 +134,16 @@ def build_rainfall_options(
     metadata = _metadata(sections)
     if metadata:
         try:
+            start_seconds = int(metadata["start_s"])
+            duration_seconds = int(metadata["duration_s"])
             current = {
-                "start_seconds": int(metadata["start_s"]),
-                "end_seconds": int(metadata["end_s"]),
-                "return_period": metadata["return_period"],
+                "start_seconds": start_seconds,
+                "duration_seconds": duration_seconds,
+                "end_seconds": start_seconds + duration_seconds,
+                "total_rainfall_mm": float(metadata["total_mm"]),
+                "peak_rainfall_mm_h": float(metadata.get("peak_mm_h", "0")),
+                "peak_ratio": float(metadata.get("r", str(CHICAGO_R))),
+                "formula": metadata.get("formula", DESIGN_RAIN_FORMULA),
             }
         except (KeyError, ValueError) as exc:
             raise ParameterValidationError("设计降雨元数据格式无效") from exc
@@ -142,68 +154,81 @@ def build_rainfall_options(
             "gage_name": gage_name,
             "series_name": series_name,
             "time_step_seconds": DT_SECONDS,
-            "available_return_periods": [
-                {"value": key, **value} for key, value in RETURN_PERIODS.items()
-            ],
         }
     )
     return current
 
 
-def _validate(values: dict[str, Any], simulation_duration: int) -> tuple[int, int, str]:
+def _validate(values: dict[str, Any], simulation_duration: int) -> tuple[int, int, int, float]:
     start = values.get("start_seconds")
-    end = values.get("end_seconds")
-    return_period = values.get("return_period")
+    duration = values.get("duration_seconds")
+    total_rainfall = values.get("total_rainfall_mm")
     if isinstance(start, bool) or not isinstance(start, int):
         raise ParameterValidationError("降雨开始时间必须是整数秒")
-    if isinstance(end, bool) or not isinstance(end, int):
-        raise ParameterValidationError("降雨结束时间必须是整数秒")
-    if start < 0 or start >= end:
-        raise ParameterValidationError("降雨时间必须满足 0 ≤ 开始时间 < 结束时间")
+    if isinstance(duration, bool) or not isinstance(duration, int):
+        raise ParameterValidationError("降雨时长必须是整数秒")
+    if isinstance(total_rainfall, bool) or not isinstance(total_rainfall, (int, float)):
+        raise ParameterValidationError("总降雨量必须是数值")
+    total_rainfall = float(total_rainfall)
+    if start < 0 or duration <= 0:
+        raise ParameterValidationError("降雨开始时间必须不小于 0，降雨时长必须大于 0")
+    end = start + duration
     if end > simulation_duration:
         raise ParameterValidationError("降雨结束时间不能超过模拟时长")
-    if start % DT_SECONDS or end % DT_SECONDS:
-        raise ParameterValidationError(f"降雨开始和结束时间必须是 {DT_SECONDS} 秒的整数倍")
-    if return_period not in RETURN_PERIODS:
-        raise ParameterValidationError("不支持的降雨重现期")
-    return start, end, return_period
+    if start % DT_SECONDS or duration % DT_SECONDS:
+        raise ParameterValidationError(f"降雨开始时间和时长必须是 {DT_SECONDS} 秒的整数倍")
+    if not math.isfinite(total_rainfall) or total_rainfall <= 0:
+        raise ParameterValidationError("总降雨量必须是大于 0 的有限数值")
+    return start, duration, end, total_rainfall
 
 
-def _instant_mm_h(t_from_peak_min: float, *, rising: bool, amplitude: float) -> float:
+def _instant_mm_h(distance_from_peak_min: float, *, rising: bool) -> float:
     scale = CHICAGO_R if rising else 1.0 - CHICAGO_R
-    t = max(0.0, t_from_peak_min)
-    denominator = (t / scale + IDF_B_MIN) ** (IDF_N + 1.0)
-    return amplitude * ((1.0 - IDF_N) * t / scale + IDF_B_MIN) / denominator
+    t = max(0.0, distance_from_peak_min) / scale
+    numerator = (1.0 - HAIKOU_N) * t + HAIKOU_B_MIN
+    denominator = (t + HAIKOU_B_MIN) ** (HAIKOU_N + 1.0)
+    q_lps_ha = (
+        HAIKOU_A
+        * (1.0 + HAIKOU_C * math.log10(REFERENCE_RETURN_PERIOD))
+        * numerator
+        / denominator
+    )
+    return q_lps_ha * MM_H_PER_LPS_HA
 
 
 def build_chicago_series(
     start_seconds: int,
-    end_seconds: int,
-    return_period: str,
+    duration_seconds: int,
+    total_rainfall_mm: float,
     simulation_duration: int,
 ) -> list[tuple[int, float]]:
-    duration = end_seconds - start_seconds
-    peak = RETURN_PERIODS[return_period]["peak_mm_h"]
-    amplitude = peak * (IDF_B_MIN**IDF_N)
-    peak_seconds = CHICAGO_R * duration
-    peak_interval = int(peak_seconds // DT_SECONDS) * DT_SECONDS
-    series: list[tuple[int, float]] = []
+    end_seconds = start_seconds + duration_seconds
+    peak_seconds = CHICAGO_R * duration_seconds
+    raw_series: list[tuple[int, float]] = []
     for offset in range(0, simulation_duration + 1, DT_SECONDS):
         if offset < start_seconds or offset >= end_seconds:
             intensity = 0.0
         else:
-            local_offset = offset - start_seconds
-            if local_offset == peak_interval:
-                intensity = peak
+            midpoint = offset - start_seconds + DT_SECONDS / 2.0
+            if midpoint <= peak_seconds:
+                distance_min = (peak_seconds - midpoint) / 60.0
+                intensity = _instant_mm_h(distance_min, rising=True)
             else:
-                midpoint = local_offset + DT_SECONDS / 2.0
-                rising = midpoint <= peak_seconds
-                distance_min = abs(midpoint - peak_seconds) / 60.0
-                intensity = _instant_mm_h(distance_min, rising=rising, amplitude=amplitude)
-        series.append((offset, max(0.0, intensity)))
-    if series[-1][0] != simulation_duration:
-        series.append((simulation_duration, 0.0))
-    return series
+                distance_min = (midpoint - peak_seconds) / 60.0
+                intensity = _instant_mm_h(distance_min, rising=False)
+        raw_series.append((offset, max(0.0, intensity)))
+    if raw_series[-1][0] != simulation_duration:
+        raw_series.append((simulation_duration, 0.0))
+
+    standard_depth_mm = sum(
+        intensity * DT_SECONDS / 3600.0
+        for offset, intensity in raw_series
+        if start_seconds <= offset < end_seconds
+    )
+    if standard_depth_mm <= 0:
+        raise ParameterValidationError("标准降雨曲线累计雨量必须大于 0")
+    scale = total_rainfall_mm / standard_depth_mm
+    return [(offset, intensity * scale) for offset, intensity in raw_series]
 
 
 def _replace_sections(content: str, replacements: dict[str, list[str]]) -> str:
@@ -235,12 +260,17 @@ def apply_rainfall_options(
     values: dict[str, Any],
     simulation_duration: int,
 ) -> tuple[str, list[dict[str, str]]]:
-    start, end, return_period = _validate(values, simulation_duration)
+    start, duration, end, total_rainfall = _validate(values, simulation_duration)
     current = build_rainfall_options(sections, simulation_duration)
     _, series_name = _rain_gage(sections)
     flow_units = _option(sections, "FLOW_UNITS").upper()
     imperial = flow_units in {"CFS", "GPM", "MGD"}
-    generated = build_chicago_series(start, end, return_period, simulation_duration)
+    generated = build_chicago_series(start, duration, total_rainfall, simulation_duration)
+    peak_rainfall_mm_h = max(
+        intensity
+        for offset, intensity in generated
+        if start <= offset < end
+    )
 
     rain_gages: list[str] = []
     for line in sections.get("RAINGAGES", []):
@@ -265,8 +295,10 @@ def apply_rainfall_options(
         )
     ]
     time_series.append(
-        f"{DESIGN_RAIN_MARKER} return_period={return_period} start_s={start} "
-        f"end_s={end} dt_s={DT_SECONDS}"
+        f"{DESIGN_RAIN_MARKER} schema=2 formula={DESIGN_RAIN_FORMULA} "
+        f"start_s={start} duration_s={duration} total_mm={total_rainfall:.12g} "
+        f"peak_mm_h={peak_rainfall_mm_h:.12g} r={CHICAGO_R} "
+        f"p_ref={REFERENCE_RETURN_PERIOD:g} dt_s={DT_SECONDS}"
     )
     model_start = _simulation_start(sections)
     for offset, intensity_mm_h in generated:
@@ -278,8 +310,8 @@ def apply_rainfall_options(
     changes: list[dict[str, str]] = []
     fields = (
         ("start_seconds", "降雨开始时间", "秒"),
-        ("end_seconds", "降雨结束时间", "秒"),
-        ("return_period", "降雨强度", ""),
+        ("duration_seconds", "降雨时长", "秒"),
+        ("total_rainfall_mm", "总降雨量", "mm"),
     )
     for field, label, unit in fields:
         old_value = str(current[field])
