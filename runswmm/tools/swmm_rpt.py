@@ -9,7 +9,11 @@ from __future__ import annotations
   2. 与 .inp 对应的 .rpt 结果报告文件（用于解析排放口出流、节点淹没、
      管段峰值与满流、以及汇水区地表蓄水总量等结果）。
 
-程序生成一个 JSON 文件作为输出：
+程序**同时生成两个 JSON 文件**作为输出。两个文件结构完全相同（rate + original），
+只有 rate 表的计算口径不同，节点清单与坐标完全一致，可以逐点对照：
+
+  data/results/rate_<主干名>.json           # ① 只用 junction 溢流数据算 rate
+  data/results/rate_<主干名>_with_sub.json  # ② 溢流 + 出水口出流 + 汇水区地表蓄水
 
   {
     "rate": [                                  # 计算后的速率信息（合并后的单一列表）
@@ -20,7 +24,24 @@ from __future__ import annotations
     "original": { ... }                        # 原本的解析信息 + 新增的蓄水字段
   }
 
-rate 部分：
+rate 部分（两套口径，见 original.rate_basis）：两套口径的**节点清单与坐标完全相同**，
+唯一区别是「汇水区地表蓄水量算不算进 rate」。两者互补，水量不重不漏。
+
+  * **rate_<主干名>.json**（rate_basis = "without_subcatchment_storage"，主口径）——
+    **不含汇水区地表蓄水**：rate = (该节点累计溢流量 + 该节点排放口排放量) / (sim_hours*3600)
+      - 溢流量取 .rpt 的 Node Flooding Summary（体积列 10^6 ltr -> m3），即节点漫出的水；
+      - 排放量取 Outfall Loading Summary 的 Total Volume，即 sea*/mount* 排走的水；
+      - **留在汇水区地表的水（Final Storage）不在这里算**，它由虚拟降雨雨型
+        chi_<主干名>.txt 代表（见 main.py）。因此「Σ rate × 模拟时长 + 面雨总量」
+        正好等于全部水量，既不会像"只算 junction 溢流"那样漏掉 sea*/mount* 的排放量，
+        也不会和虚拟降雨重复计算。
+  * **rate_<主干名>_with_sub.json**（rate_basis = "with_subcatchment_storage"）——
+    **含汇水区地表蓄水**（"把留在汇水区的水量加到溢流上"的口径）：
+        rate = (该节点累计溢流量 + 该节点累计排放量 + Σ关联汇水区地表蓄水量)
+               / (sim_hours * 3600)
+      即本模块的历史口径，**与旧版 rate JSON 完全一致**。
+
+rate 表的节点清单（两个文件相同）：
   * **rate 表里的点全部是"虚拟出水口"**。判定口径：
       只要被汇水区在 [SUBCATCHMENTS] 的 Outlet 列点到名，就视为虚拟出水口，
       不管它是 J* / sea* / mount* / vir* / out* 中的哪一种；
@@ -35,7 +56,8 @@ rate 部分：
   * total_volume(m3) = 该节点的累计溢流量
                      + 该节点的累计排放量（若它是 Outfall）
                      + Σ(该节点作为 Outlet 关联的**所有**汇水区地表蓄水量)
-  * rate = total_volume / (sim_hours * 3600)，单位 m3/s
+  * rate = total_volume / (sim_hours * 3600)（total_volume 与 rate 说的是 with_sub 口径；
+                                           不含蓄水口径 = total_volume - 汇水区地表蓄水量），单位 m3/s
   * coordinate 来自 .inp 的 [COORDINATES]；若虚拟出水口没有坐标，则回退到
     其关联汇水区多边形的质心（见 _resolve_virtual_outfall_coordinate），
     仍取不到时输出 null 并在日志中说明。
@@ -68,7 +90,8 @@ original 部分除保留 parse_report() 解析出的全部原始信息（流量�
   * outfall_flows / node_flooding 中每一条新增 surface_storage_m3 字段
   * outlet_storage：逐出水口的汇总（构成明细，便于核对）
   * subcatch_surface_storage：逐汇水区的地表蓄水量明细（可追溯，不造假）
-  * surface_storage_meta：取数方法、总量核对、缩放系数、告警
+  * surface_storage_meta：取数方法、总量核对、缩放系数、告警，
+    以及本文件用的 rate 口径（rate_basis / rate_basis_note / rate_basis_volume_in_rate_m3）
   * subcatchment_outlets：汇水区 -> 出水口的映射
 
 命令行接口（以下三种等价）：
@@ -76,14 +99,24 @@ original 部分除保留 parse_report() 解析出的全部原始信息（流量�
   python -m tools.swmm_rpt <inp> [<rpt>] [--out <json路径>]
   python tools/swmm_rpt.py <inp>            # 自动使用同目录同名 .rpt
 
-默认输出位置为 tools/config.py 中的 RESULTS_DIR，
-文件命名为 rate_<原inp文件主干名>.json，
-例如 data/results/rate_LC_MANUAL_23.json。
+默认输出位置为 tools/config.py 中的 RESULTS_DIR，**一次写两个文件**：
+  rate_<原inp文件主干名>.json           —— 不含汇水区地表蓄水（溢流 + 出水口排放量）
+  rate_<原inp文件主干名>_with_sub.json  —— 加上 Σ关联汇水区地表蓄水量
+例如 data/results/rate_LC_MANUAL_23.json 与 rate_LC_MANUAL_23_with_sub.json。
+--out 给出的是**前一个**的路径，后一个由它派生（主干名后加 _with_sub）。
 
 Python 调用接口：
-  from tools.swmm_rpt import build_output_data, write_output_file
-  data = build_output_data("xxx.inp", "xxx.rpt")   # -> dict（可直接 json.dump）
-  path = write_output_file("xxx.inp", "xxx.rpt")   # -> Path（已写出 JSON）
+  from tools.swmm_rpt import (build_output_data, build_output_data_from_bundle,
+                              prepare_report_bundle, write_output_file,
+                              write_output_files)
+  data = build_output_data("xxx.inp", "xxx.rpt")            # -> dict（默认 with_sub 口径）
+  data = build_output_data("xxx.inp", "xxx.rpt",
+                           rate_basis="without_subcatchment_storage")  # -> 不含蓄水口径
+  paths = write_output_files("xxx.inp", "xxx.rpt")          # -> (不含蓄水, 蓄水)
+  # 想只复算一次地表蓄水量、却要两种口径的 dict：
+  bundle = prepare_report_bundle("xxx.inp", "xxx.rpt")
+  d1 = build_output_data_from_bundle(bundle, rate_basis="without_subcatchment_storage")
+  d2 = build_output_data_from_bundle(bundle, rate_basis="with_subcatchment_storage")
 
 说明与约定：
   * 报告中的体积列单位是 10^6 ltr（百万升），1 百万升 = 1000 立方米；
@@ -242,7 +275,12 @@ class SurfaceStorageResult:
 
 @dataclass(frozen=True)
 class OutletAggregate:
-    """按出水口节点汇总后的水量构成（全部单位 m3，rate 为 m3/s）。"""
+    """按出水口节点汇总后的水量构成（全部单位 m3，rate 为 m3/s）。
+
+    两套 rate 口径**同时**保留，具体输出哪一套由调用方（rate_basis）决定：
+      * rate_without_sub = (该节点溢流量 + 该节点排放口出流量) / (sim_hours*3600)
+      * rate_with_sub    = 上面两项 + Σ关联汇水区地表蓄水量，再除以时间
+    """
 
     node: str
     node_class: str                 # junction / outfall / other
@@ -254,7 +292,28 @@ class OutletAggregate:
     node_flood_volume_m3: float
     outfall_outflow_m3: float
     total_volume_m3: float
-    rate: float
+    # 主口径参与 rate 的水量 = 溢流量 + 出水口排放量 = total - 汇水区地表蓄水。
+    without_sub_volume_m3: float
+    # 其中溢流发生在**非** junction 节点的部分（信息用：本项目的案例里为 0）。
+    nonjunction_flood_volume_m3: float
+    rate_with_sub: float
+    rate_without_sub: float
+
+    # ---- 口径选择 ----
+    @property
+    def rate(self) -> float:
+        """向后兼容旧字段：等价于 rate_with_sub（历史口径）。"""
+        return self.rate_with_sub
+
+    def rate_for(self, rate_basis: str) -> float:
+        """按口径取 rate（m3/s）。"""
+        return (self.rate_without_sub if check_rate_basis(rate_basis)
+                == RATE_BASIS_WITHOUT_SUB else self.rate_with_sub)
+
+    def rate_volume_m3_for(self, rate_basis: str) -> float:
+        """按口径取参与 rate 计算的水量（m3）。"""
+        return (self.without_sub_volume_m3 if check_rate_basis(rate_basis)
+                == RATE_BASIS_WITHOUT_SUB else self.total_volume_m3)
 
 
 @dataclass(frozen=True)
@@ -571,6 +630,25 @@ def _reported_runoff_final_storage(rpt_text: str) -> tuple[float | None, float |
     if not m:
         return (None, None)
     return (float(m.group(1)), float(m.group(2)))
+
+
+def read_runoff_final_storage(
+    rpt_path: str | Path,
+) -> tuple[float | None, float | None]:
+    """读取 .rpt 的 Runoff Quantity Continuity -> Final Storage。
+
+    Returns:
+        (hectare-m, mm)：官方报告的同一份水量的两种单位；
+        报告中找不到该行时返回 (None, None)（不猜、不填 0）。
+
+    该值同时是：
+      * 汇水区地表蓄水量反推值的缩放目标（compute_surface_storage）；
+      * 虚拟降雨雨型（tools/get_chi.py 生成的 chi_<主干名>.txt）的雨量。
+    """
+    path = Path(rpt_path).expanduser().resolve()
+    if not path.exists():
+        raise FileNotFoundError(f"Invalid report file: {path}")
+    return _reported_runoff_final_storage(_read_text_file(path))
 
 
 def _pick_writable_dir(inp_path: Path) -> Path:
@@ -1204,6 +1282,56 @@ _M3_PER_1E6_LITRE = 1000.0
 # 设为 None 可输出 float 原始精度。
 _RATE_DECIMALS = 6
 
+# ---------------------------------------------------------------------------
+# rate 的两套计算口径（两个 JSON 文件的唯一区别 = 要不要算汇水区地表蓄水）
+#   * without_subcatchment_storage —— 节点溢流量 + 出水口排放量（本模块的主口径，
+#     输出 rate_<名>.json）。汇水区滞蓄的那部分水量**不在这里**，它由虚拟降雨
+#     雨型 chi_<名>.txt 代表，所以点位 + 面雨 = 全部水量，不会重复也不会丢。
+#   * with_subcatchment_storage —— 上面两项 + Σ关联汇水区地表蓄水量（历史口径，
+#     输出 rate_<名>_with_sub.json）
+# ---------------------------------------------------------------------------
+RATE_BASIS_WITHOUT_SUB = "without_subcatchment_storage"
+RATE_BASIS_WITH_SUB = "with_subcatchment_storage"
+RATE_BASIS_CHOICES: tuple[str, ...] = (RATE_BASIS_WITHOUT_SUB, RATE_BASIS_WITH_SUB)
+
+# 上一版用过的口径名，仍然接受（值统一归一化到 RATE_BASIS_WITHOUT_SUB）。
+RATE_BASIS_ALIASES: dict[str, str] = {
+    "flood_only": RATE_BASIS_WITHOUT_SUB,       # 早期只算 junction 溢流的写法
+    "flood_and_outfall": RATE_BASIS_WITHOUT_SUB,
+}
+
+# 主口径（rate_<名>.json）里参与 rate 的节点溢流水量：包含 junction 溢流，
+# 也包含非 junction 节点（例如 outfall）自身的溢流 —— 两者都是"离开管网"的水。
+# 实测本项目的两个案例里，溢流全部发生在 junction（非 junction 溢流量 = 0），
+# 所以 "junction 溢流" 与 "全部节点溢流" 数值相同；这里取后者以免别的模型丢水。
+
+RATE_BASIS_NOTES: dict[str, str] = {
+    RATE_BASIS_WITHOUT_SUB: (
+        "不含汇水区地表蓄水：rate = (该节点累计溢流量 + 该节点累计排放量(m3)) / "
+        "(sim_hours * 3600)。汇水区滞蓄的那部分水量由虚拟降雨雨型 "
+        "chi_<主干名>.txt 代表，因此「点位 rate × 时间 + 面雨」正好等于全部水量。"),
+    RATE_BASIS_WITH_SUB: (
+        "含汇水区地表蓄水：rate = (该节点累计溢流量 + 累计排放量 + Σ关联汇水区"
+        "地表蓄水量) / (sim_hours * 3600)，即本模块的历史口径。"),
+}
+
+# 每个口径参与 rate 的水量构成（写进 meta，便于下游核对）。
+RATE_BASIS_COMPONENTS: dict[str, list[str]] = {
+    RATE_BASIS_WITHOUT_SUB: ["node_flood_volume_m3", "outfall_outflow_m3"],
+    RATE_BASIS_WITH_SUB: [
+        "node_flood_volume_m3", "outfall_outflow_m3", "surface_storage_m3"],
+}
+
+
+def check_rate_basis(rate_basis: str) -> str:
+    """校验 rate 口径取值，返回规范化后的名称（兼容旧别名）。"""
+    normalized = RATE_BASIS_ALIASES.get(rate_basis, rate_basis)
+    if normalized not in RATE_BASIS_CHOICES:
+        raise ValueError(
+            f"未知的 rate_basis: {rate_basis!r}，可选：{list(RATE_BASIS_CHOICES)}"
+            f"（兼容别名：{list(RATE_BASIS_ALIASES)}）")
+    return normalized
+
 
 def _round_rate(value: float) -> float:
     """对速率做合理精度舍入；_RATE_DECIMALS 为 None 时保留原精度。"""
@@ -1319,8 +1447,15 @@ def build_outlet_aggregates(
     #   sea*/mount*/vir*）不进入 rate 表；其原始出流仍完整保留在 original.outfall_flows，
     #   逐个明细见 original.excluded_real_outfalls。
     #   如需把全部真实排放口也放进 rate，用 include_real_outfalls=True。
-    designated_by_subcatchment = set(outlet_map.keys())
-    virtual_by_name = {o.name for o in outfalls if o.is_virtual}
+    # 注意：这里同时保留"有序清单"和"集合"两种形式。
+    # rate 表的节点顺序必须**可复现**：如果直接遍历 set，Python 的字符串哈希
+    # 随机化(PYTHONHASHSEED)会让同一份输入在不同进程里产出不同的节点顺序
+    # （实测：同一 .inp/.rpt 两次运行，rate 顺序不同、数值完全相同）。
+    # 因此顺序一律取自 [SUBCATCHMENTS] / [OUTFALLS] / .rpt 的自然顺序。
+    designated_order = list(outlet_map.keys())               # 按 [SUBCATCHMENTS] 顺序
+    virtual_by_name_order = [o.name for o in outfalls if o.is_virtual]   # 按 [OUTFALLS] 顺序
+    designated_by_subcatchment = set(designated_order)
+    virtual_by_name = set(virtual_by_name_order)
     virtual_names = designated_by_subcatchment | virtual_by_name
 
     system_rows = [n for n in outfall_by_node if n.strip().lower() == "system"]
@@ -1330,9 +1465,9 @@ def build_outlet_aggregates(
             "已保留在 original.outfall_flows，但不进入 rate 列表。")
 
     candidates: OrderedDict[str, None] = OrderedDict()
-    for nm in designated_by_subcatchment:                   # 汇水区指定的虚拟出水口
+    for nm in designated_order:                              # 汇水区指定的虚拟出水口
         candidates.setdefault(nm, None)
-    for nm in virtual_by_name:                               # 按名字认定的虚拟出水口
+    for nm in virtual_by_name_order:                         # 按名字认定的虚拟出水口
         candidates.setdefault(nm, None)
     for nm in flood_by_node:                                 # 溢流节点（未被指定的也要收）
         candidates.setdefault(nm, None)
@@ -1386,6 +1521,7 @@ def build_outlet_aggregates(
         })
 
     aggregates: list[OutletAggregate] = []
+    seconds = inp.sim_hours * _HOURS_TO_SECONDS
     for node in candidates:
         subs = tuple(outlet_map.get(node, ()))
         st = storage_by_outlet.get(node, 0.0)
@@ -1400,13 +1536,21 @@ def build_outlet_aggregates(
         if coord is None:
             coord, src = _resolve_virtual_outfall_coordinate(
                 node, inp.coordinates, list(subs), polygons)
+        # 主口径（不含汇水区地表蓄水）= 该节点溢流量 + 该节点排放口排放量。
+        # 两者都是"离开管网"的水：溢流从节点漫出，排放量从 sea*/mount* 排走；
+        # 留在汇水区地表的水由虚拟降雨雨型代表，不能在这里再算一遍。
+        without_sub_volume = fl + of
+        nonjunction_flood = 0.0 if node in junction_set else fl
         aggregates.append(
             OutletAggregate(
                 node=node, node_class=cls, is_virtual_outfall=is_virtual,
                 coordinate=coord, coordinate_source=src, subcatchments=subs,
                 surface_storage_m3=st, node_flood_volume_m3=fl,
                 outfall_outflow_m3=of, total_volume_m3=total,
-                rate=_round_rate(total / (inp.sim_hours * _HOURS_TO_SECONDS)),
+                without_sub_volume_m3=without_sub_volume,
+                nonjunction_flood_volume_m3=nonjunction_flood,
+                rate_with_sub=_round_rate(total / seconds),
+                rate_without_sub=_round_rate(without_sub_volume / seconds),
             )
         )
 
@@ -1466,6 +1610,12 @@ def build_outlet_aggregates(
         "total_node_flood_in_rate_m3": sum(a.node_flood_volume_m3 for a in aggregates),
         "total_outfall_outflow_in_rate_m3": sum(a.outfall_outflow_m3 for a in aggregates),
         "total_volume_in_rate_m3": sum(a.total_volume_m3 for a in aggregates),
+        # 主口径（不含汇水区地表蓄水）的总量 = 全部节点溢流 + 全部出水口排放量。
+        "total_without_sub_volume_in_rate_m3":
+            sum(a.without_sub_volume_m3 for a in aggregates),
+        # 其中溢流发生在非 junction 节点（例如 outfall）的部分（信息用，已计入 rate）。
+        "nonjunction_flood_volume_m3":
+            sum(a.nonjunction_flood_volume_m3 for a in aggregates),
         # 被删除的实际排放口（仅用于核对，不进入 rate）
         "n_excluded_real_outfalls": len(excluded),
         "excluded_real_outfalls_outflow_m3": excluded_outflow_m3,
@@ -1488,6 +1638,50 @@ def build_outlet_aggregates(
     return aggregates, storage_meta, storage_by_name
 
 
+def _basis_meta(
+    storage_meta: dict[str, object],
+    aggregates: list[OutletAggregate],
+    inp: SwmmInpData,
+    rate_basis: str,
+) -> dict[str, object]:
+    """在共享 meta 之上补一份「本文件用的是哪套 rate 口径」的说明。
+
+    返回浅拷贝（warnings 也复制一份），因此两个口径的 JSON 可以各自带上自己的
+    告警而互不影响。
+    """
+    basis = check_rate_basis(rate_basis)
+    meta = dict(storage_meta)
+    meta["warnings"] = list(storage_meta.get("warnings", ()))  # type: ignore[arg-type]
+    rate_volume = sum(a.rate_volume_m3_for(basis) for a in aggregates)
+    meta.update({
+        "rate_basis": basis,
+        "rate_basis_note": RATE_BASIS_NOTES[basis],
+        "rate_basis_components": list(RATE_BASIS_COMPONENTS[basis]),
+        "rate_basis_volume_in_rate_m3": rate_volume,
+        "rate_basis_total_m3s": sum(a.rate_for(basis) for a in aggregates),
+    })
+    if basis == RATE_BASIS_WITHOUT_SUB:
+        meta["rate_basis_excluded_components"] = ["surface_storage_m3"]
+        # 两个口径的水量核对：本口径 + 汇水区地表蓄水 = with_sub 口径（应严格相等）。
+        storage_total = sum(a.surface_storage_m3 for a in aggregates)
+        with_sub_total = sum(a.total_volume_m3 for a in aggregates)
+        meta["rate_basis_water_balance_check"] = {
+            "without_sub_m3": rate_volume,
+            "surface_storage_m3": storage_total,
+            "sum_m3": rate_volume + storage_total,
+            "with_sub_m3": with_sub_total,
+            "difference_m3": rate_volume + storage_total - with_sub_total,
+            "note": ("主口径（点位）+ 汇水区地表蓄水（虚拟降雨）= 含蓄水口径，"
+                     "两种交付方案水量等价、不重不漏。"),
+        }
+        nonjunction = float(meta.get("nonjunction_flood_volume_m3") or 0.0)
+        if nonjunction > 1e-9:
+            meta["warnings"].append(
+                f"注意：有 {nonjunction:,.3f} m3 的溢流发生在**非 junction 节点**"
+                "（例如 outfall）；本口径按「全部节点溢流」计入 rate（已包含）。")
+    return meta
+
+
 def _build_original_section(
     summary: SwmmReportSummary,
     inp: SwmmInpData,
@@ -1496,8 +1690,15 @@ def _build_original_section(
     aggregates: list[OutletAggregate],
     storage_meta: dict[str, object],
     storage_by_name: dict[str, SubcatchmentStorage],
+    *,
+    rate_basis: str = RATE_BASIS_WITH_SUB,
 ) -> dict[str, object]:
-    """original 部分：既有解析结果 + INP 元信息 + 坐标 + 新增的汇水区蓄水字段。"""
+    """original 部分：既有解析结果 + INP 元信息 + 坐标 + 新增的汇水区蓄水字段。
+
+    rate_basis 决定 outlet_storage.rate_m3s 与 surface_storage_meta.rate_basis
+    用哪套口径（两个 JSON 文件只有这一点不同）。
+    """
+    basis = check_rate_basis(rate_basis)
     data = summary.to_dict()
 
     storage_by_outlet = {a.node: a.surface_storage_m3 for a in aggregates}
@@ -1521,6 +1722,7 @@ def _build_original_section(
         "report_path": data["report_path"],
         "inp_path": str(inp.path),
         "flow_unit": data["flow_unit"],
+        "rate_basis": basis,
         "start_date": inp.options.get("START_DATE"),
         "start_time": inp.options.get("START_TIME"),
         "end_date": inp.options.get("END_DATE"),
@@ -1551,7 +1753,14 @@ def _build_original_section(
                 "node_flood_volume_m3": round(a.node_flood_volume_m3, 6),
                 "outfall_outflow_m3": round(a.outfall_outflow_m3, 6),
                 "total_volume_m3": round(a.total_volume_m3, 6),
-                "rate_m3s": a.rate,
+                # 主口径的分子 = 溢流量 + 出水口排放量（不含汇水区地表蓄水）
+                "without_sub_volume_m3": round(a.without_sub_volume_m3, 6),
+                # 两套口径的速率都给出，rate_m3s 是**本文件**用的那一套
+                "rate_basis": basis,
+                "rate_basis_volume_m3": round(a.rate_volume_m3_for(basis), 6),
+                "rate_m3s": a.rate_for(basis),
+                "rate_without_sub_m3s": a.rate_without_sub,
+                "rate_with_sub_m3s": a.rate_with_sub,
             }
             for a in aggregates
         ],
@@ -1572,8 +1781,8 @@ def _build_original_section(
             }
             for s in storage_by_name.values()
         ],
-        # ---- 新增：取数方法 / 核对 / 告警 ----
-        "surface_storage_meta": storage_meta,
+        # ---- 新增：取数方法 / 核对 / 告警 + 本文件的 rate 口径 ----
+        "surface_storage_meta": _basis_meta(storage_meta, aggregates, inp, basis),
         # ---- 新增：被删除出 rate 表的真实排放口（保证不丢数据）----
         "excluded_real_outfalls": storage_meta.get("excluded_real_outfalls", []),
         # ---- 新增：因被汇水区指定为 Outlet 而保留的真实排放口 ----
@@ -1586,28 +1795,35 @@ def _build_original_section(
     }
 
 
-def build_output_data(
+@dataclass(frozen=True)
+class ReportBundle:
+    """一次解析 + 一次复算的全部中间结果。
+
+    两个 rate 口径（不含蓄水 / 含蓄水）共用它，
+    因此**汇水区地表蓄水量只复算一次**（那一步要跑一遍 SWMM，约数秒）。
+    """
+
+    inp: SwmmInpData
+    summary: SwmmReportSummary
+    subcatchments: list[SubcatchmentInfo]
+    outfalls: list[OutfallInfo]
+    aggregates: list[OutletAggregate]
+    storage_meta: dict[str, object]
+    storage_by_name: dict[str, SubcatchmentStorage]
+
+
+def prepare_report_bundle(
     inp_path: str | Path,
     rpt_path: str | Path,
     *,
     surface_storage: str = "auto",
     scale_storage_to_reported: bool = True,
     include_real_outfalls: bool = False,
-) -> dict[str, object]:
-    """构建完整输出 dict：{rate: [...], original: {...}}。
+) -> ReportBundle:
+    """解析 INP + RPT，并（默认）复算一次以取得逐汇水区地表蓄水量。
 
-    Args:
-        inp_path: .inp 输入文件路径（用于解析出水口映射、坐标与复算蓄水量）。
-        rpt_path: 与 .inp 对应的 .rpt 结果文件路径。
-        surface_storage: "auto"（默认，质量平衡反推）/ "off"。
-        scale_storage_to_reported: 是否把反推的蓄水总量缩放到 .rpt 的官方
-            Runoff Quantity Continuity -> Final Storage。
-        include_real_outfalls: 是否把真实排放口（如 out1/out2…）也放进 rate 表。
-            默认 False —— rate 表只保留 junction(J*) 与虚拟出水口(sea*/mount*)，
-            被排除的真实排放口明细见 original.excluded_real_outfalls。
-
-    Returns:
-        可直接 json.dump 的 dict。
+    参数含义同 build_output_data()。返回值可直接交给
+    build_output_data_from_bundle() 生成任意口径的 dict，不会重复复算。
     """
     inp = load_inp(inp_path)
     summary = parse_report_flows(rpt_path)
@@ -1621,20 +1837,108 @@ def build_output_data(
         scale_storage_to_reported=scale_storage_to_reported,
         include_real_outfalls=include_real_outfalls,
     )
+    return ReportBundle(
+        inp=inp, summary=summary, subcatchments=subcatchments, outfalls=outfalls,
+        aggregates=aggregates, storage_meta=storage_meta,
+        storage_by_name=storage_by_name,
+    )
+
+
+def build_output_data_from_bundle(
+    bundle: ReportBundle,
+    *,
+    rate_basis: str = RATE_BASIS_WITH_SUB,
+) -> dict[str, object]:
+    """按指定 rate 口径，把 ReportBundle 组装成 {rate, original} dict。"""
+    basis = check_rate_basis(rate_basis)
 
     # rate 表：统一为单一列表，不再区分 outflows / nodeflooding
     rate_section = [
-        {"node": a.node, "rate": a.rate, "coordinate": a.coordinate}
-        for a in aggregates
+        {"node": a.node, "rate": a.rate_for(basis), "coordinate": a.coordinate}
+        for a in bundle.aggregates
     ]
 
     original_section = _build_original_section(
-        summary, inp, subcatchments, outfalls, aggregates, storage_meta, storage_by_name)
+        bundle.summary, bundle.inp, bundle.subcatchments, bundle.outfalls,
+        bundle.aggregates, bundle.storage_meta, bundle.storage_by_name,
+        rate_basis=basis,
+    )
 
     return {
         "rate": rate_section,
         "original": original_section,
+        "rate_basis": basis,
+        "rate_basis_note": RATE_BASIS_NOTES[basis],
     }
+
+
+def build_output_data(
+    inp_path: str | Path,
+    rpt_path: str | Path,
+    *,
+    surface_storage: str = "auto",
+    scale_storage_to_reported: bool = True,
+    include_real_outfalls: bool = False,
+    rate_basis: str = RATE_BASIS_WITH_SUB,
+) -> dict[str, object]:
+    """构建完整输出 dict：{rate: [...], original: {...}}。
+
+    Args:
+        inp_path: .inp 输入文件路径（用于解析出水口映射、坐标与复算蓄水量）。
+        rpt_path: 与 .inp 对应的 .rpt 结果文件路径。
+        surface_storage: "auto"（默认，质量平衡反推）/ "off"。
+        scale_storage_to_reported: 是否把反推的蓄水总量缩放到 .rpt 的官方
+            Runoff Quantity Continuity -> Final Storage。
+        include_real_outfalls: 是否把真实排放口（如 out1/out2…）也放进 rate 表。
+            默认 False —— rate 表只保留 junction(J*) 与虚拟出水口(sea*/mount*)，
+            被排除的真实排放口明细见 original.excluded_real_outfalls。
+        rate_basis: rate 的计算口径。
+            * "with_subcatchment_storage"（默认，历史口径）—— 节点溢流量 + 出水口
+              排放量 + Σ关联汇水区地表蓄水量；
+            * "without_subcatchment_storage" —— 只算前两项（**不含**汇水区地表蓄水，
+              那部分水量由虚拟降雨雨型 chi_*.txt 代表）。
+            两个口径的节点清单与坐标完全相同，只有 rate 的取值不同。
+
+    Returns:
+        可直接 json.dump 的 dict。
+    """
+    bundle = prepare_report_bundle(
+        inp_path, rpt_path,
+        surface_storage=surface_storage,
+        scale_storage_to_reported=scale_storage_to_reported,
+        include_real_outfalls=include_real_outfalls,
+    )
+    return build_output_data_from_bundle(bundle, rate_basis=rate_basis)
+
+
+def default_output_path(
+    inp_path: str | Path,
+    rate_basis: str = RATE_BASIS_WITHOUT_SUB,
+) -> Path:
+    """某个口径的默认输出路径（RESULTS_DIR 下）。
+
+    * without_subcatchment_storage -> data/results/rate_<主干名>.json
+    * with_subcatchment_storage -> data/results/rate_<主干名>_with_sub.json
+    """
+    stem = Path(inp_path).expanduser().resolve().stem
+    if check_rate_basis(rate_basis) == RATE_BASIS_WITHOUT_SUB:
+        return RESULTS_DIR / f"rate_{stem}.json"
+    return RESULTS_DIR / f"rate_{stem}_with_sub.json"
+
+
+def with_sub_path_for(main_rate_path: str | Path) -> Path:
+    """由主口径（不含蓄水）的路径派生含蓄水口径的路径（主干名后加 _with_sub）。"""
+    path = Path(main_rate_path).expanduser()
+    return path.with_name(f"{path.stem}_with_sub{path.suffix}")
+
+
+def _dump_json_file(data: dict[str, object], output: Path) -> Path:
+    """把 dict 写成可读 JSON（UTF-8 + indent=4）。"""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=4)
+        handle.write("\n")
+    return output
 
 
 def write_output_file(
@@ -1645,30 +1949,71 @@ def write_output_file(
     surface_storage: str = "auto",
     scale_storage_to_reported: bool = True,
     include_real_outfalls: bool = False,
+    rate_basis: str = RATE_BASIS_WITH_SUB,
 ) -> Path:
-    """解析 INP + RPT 并写出 JSON 文件。
+    """解析 INP + RPT 并写出**一个** JSON 文件。
 
-    默认输出到 tools/config.py 的 RESULTS_DIR，
-    文件名为 rate_<原inp文件主干名>.json；可通过 out_path 覆盖。
-    使用 json.dump(..., indent=4) 保证可读性。
+    默认输出到 tools/config.py 的 RESULTS_DIR，文件名由 rate_basis 决定
+    （见 default_output_path）：without_subcatchment_storage -> rate_<主干名>.json，
+    with_subcatchment_storage -> rate_<主干名>_with_sub.json。
+    可通过 out_path 覆盖。使用 json.dump(..., indent=4) 保证可读性。
+
+    ⚠️ 只想同时拿到两个口径的文件时请用 write_output_files()：它只复算一次。
     """
     data = build_output_data(
         inp_path, rpt_path,
         surface_storage=surface_storage,
         scale_storage_to_reported=scale_storage_to_reported,
         include_real_outfalls=include_real_outfalls,
+        rate_basis=rate_basis,
     )
 
     if out_path is None:
-        inp_file = Path(inp_path).expanduser().resolve()
-        out_path = RESULTS_DIR / f"rate_{inp_file.stem}.json"
+        output = default_output_path(inp_path, rate_basis)
+    else:
+        output = Path(out_path).expanduser().resolve()
+    return _dump_json_file(data, output)
 
-    output = Path(out_path).expanduser().resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, ensure_ascii=False, indent=4)
-        handle.write("\n")
-    return output
+
+def write_output_files(
+    inp_path: str | Path,
+    rpt_path: str | Path,
+    out_path: str | Path | None = None,
+    *,
+    surface_storage: str = "auto",
+    scale_storage_to_reported: bool = True,
+    include_real_outfalls: bool = False,
+) -> tuple[Path, Path]:
+    """解析 INP + RPT，**同时写出两个 JSON**（只复算一次地表蓄水量）。
+
+    * `rate_<主干名>.json`           —— 不含汇水区地表蓄水（节点溢流量 + 出水口排放量）
+    * `rate_<主干名>_with_sub.json`  —— 再加上 Σ关联汇水区地表蓄水量
+
+    out_path 给出的是**前一个**的路径；后一个由它派生（主干名后加 _with_sub），
+    因此 -o check\\out\\rate_demo.json 会同时得到 check\\out\\rate_demo_with_sub.json。
+
+    Returns:
+        (不含蓄水口径的 json 路径, 含蓄水口径的 json 路径)
+    """
+    bundle = prepare_report_bundle(
+        inp_path, rpt_path,
+        surface_storage=surface_storage,
+        scale_storage_to_reported=scale_storage_to_reported,
+        include_real_outfalls=include_real_outfalls,
+    )
+
+    without_sub_path = (default_output_path(inp_path, RATE_BASIS_WITHOUT_SUB)
+                        if out_path is None
+                        else Path(out_path).expanduser().resolve())
+    with_sub_path = with_sub_path_for(without_sub_path)
+
+    _dump_json_file(
+        build_output_data_from_bundle(bundle, rate_basis=RATE_BASIS_WITHOUT_SUB),
+        without_sub_path)
+    _dump_json_file(
+        build_output_data_from_bundle(bundle, rate_basis=RATE_BASIS_WITH_SUB),
+        with_sub_path)
+    return without_sub_path, with_sub_path
 
 
 # ---------------------------------------------------------------------------
@@ -1692,9 +2037,11 @@ def _resolve_existing_file(value: str | Path, suffix: str, label: str) -> Path:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Parse a SWMM .inp and its .rpt report, then write a rate_*.json "
-            "summary into data/results. rate 是合并后的单一列表，"
-            "总水量 = 节点溢流量 + 排放口出流量 + 关联汇水区地表蓄水量。"
+            "Parse a SWMM .inp and its .rpt report, then write **two** rate_*.json "
+            "summaries into data/results: rate_<stem>.json（不含汇水区地表蓄水："
+            "rate = (节点溢流量 + 出水口排放量) / 时长）"
+            " 与 rate_<stem>_with_sub.json（再加上 Σ关联汇水区地表蓄水量）。"
+            "两个文件的节点清单与坐标完全相同，只有 rate 的取值不同。"
         )
     )
     parser.add_argument("inp", nargs="?", help="Path to the .inp input file")
@@ -1707,7 +2054,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "-o",
         "--out",
-        help="Explicit output JSON path (default: data/results/rate_<inp stem>.json)",
+        help="不含蓄水口径那个 JSON 的路径；含蓄水口径由它派生"
+             "（主干名后加 _with_sub）。默认 data/results/rate_<inp stem>.json "
+             "与 rate_<inp stem>_with_sub.json",
     )
     parser.add_argument(
         "--surface-storage",
@@ -1749,8 +2098,48 @@ def _setup_console() -> None:
             pass
 
 
+def print_rate_summary(json_path: Path, label: str = "") -> None:
+    """打印一个 rate JSON 的关键数字（main.py 也复用这段输出）。"""
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    meta = data["original"]["surface_storage_meta"]
+    prefix = f"[{label}] " if label else ""
+    print(f"{prefix}JSON: {json_path}")
+    print(f"{prefix}rate 口径              : "
+          f"{meta.get('rate_basis')} —— {meta.get('rate_basis_components')}")
+    print(f"{prefix}rate 条目数            : {len(data['rate'])}")
+    print(f"{prefix}  其中 junction 类型   : {meta.get('n_junctions_in_rate')}")
+    print(f"{prefix}  其中 outfall 类型    : {meta.get('n_outfall_type_in_rate')}")
+    print(f"{prefix}Σ 参与 rate 的水量     : "
+          f"{meta.get('rate_basis_volume_in_rate_m3'):,.3f} m3 "
+          f"(折合 {meta.get('rate_basis_total_m3s'):,.3f} m3/s)")
+    if meta.get("rate_basis") == RATE_BASIS_WITH_SUB:
+        print(f"{prefix}  ├ 节点溢流量        : "
+              f"{meta.get('total_node_flood_in_rate_m3'):,.3f} m3")
+        print(f"{prefix}  ├ 排放口出流量      : "
+              f"{meta.get('total_outfall_outflow_in_rate_m3'):,.3f} m3")
+        print(f"{prefix}  └ 汇水区地表蓄水量  : "
+              f"{meta.get('total_surface_storage_in_rate_m3'):,.3f} m3 "
+              f"(反推 {meta.get('raw_total_m3'):,.3f} m3, "
+              f"缩放系数 {meta.get('scale_factor'):.6f})")
+    else:
+        print(f"{prefix}  ├ 节点溢流量        : "
+              f"{meta.get('total_node_flood_in_rate_m3'):,.3f} m3")
+        print(f"{prefix}  └ 排放口出流量      : "
+              f"{meta.get('total_outfall_outflow_in_rate_m3'):,.3f} m3")
+        balance = meta.get("rate_basis_water_balance_check") or {}
+        if balance:
+            print(f"{prefix}  （+ 汇水区地表蓄水量 "
+                  f"{balance.get('surface_storage_m3'):,.3f} m3 = 含蓄水口径 "
+                  f"{balance.get('with_sub_m3'):,.3f} m3，由虚拟降雨 chi_*.txt 代表）")
+    print(f"{prefix}时间口径               : {meta.get('rate_time_basis')}")
+
+
 def main(argv: list[str] | None = None) -> int:
-    """CLI 入口：python tools/swmm_rpt.py <inp> [<rpt>] [--out <json>]"""
+    """CLI 入口：python tools/swmm_rpt.py <inp> [<rpt>] [--out <json>]
+
+    一次写出两个 JSON：rate_<主干名>.json（不含汇水区地表蓄水）与
+    rate_<主干名>_with_sub.json（加上汇水区地表蓄水）。--out 给的是前者的路径。
+    """
     _setup_console()
     args = parse_args(argv)
     if not args.inp:
@@ -1769,33 +2158,18 @@ def main(argv: list[str] | None = None) -> int:
                     f"Cannot find result file automatically: {rpt_path}\n"
                     "Pass the .rpt path explicitly."
                 )
-        out_path = write_output_file(
+        without_sub_path, with_sub_path = write_output_files(
             inp_path, rpt_path, out_path=args.out,
             surface_storage=args.surface_storage,
             scale_storage_to_reported=not args.no_scale_storage,
             include_real_outfalls=args.include_real_outfalls,
         )
         if not args.quiet:
-            data = json.loads(Path(out_path).read_text(encoding="utf-8"))
-            meta = data["original"]["surface_storage_meta"]
             print(f"INP : {inp_path}")
             print(f"RPT : {rpt_path}")
-            print(f"JSON: {out_path}")
-            print(f"rate 条目数            : {len(data['rate'])}")
-            print(f"  其中 junction 类型   : {meta.get('n_junctions_in_rate')}")
-            print(f"  其中 outfall 类型    : {meta.get('n_outfall_type_in_rate')}")
-            print(f"  按 sea*/mount*/vir* 命名: {meta.get('n_virtual_by_name_prefix')}")
-            print(f"Σ 汇水区地表蓄水量     : "
-                  f"{meta.get('total_surface_storage_in_rate_m3'):,.3f} m3 "
-                  f"(反推 {meta.get('raw_total_m3'):,.3f} m3, "
-                  f"缩放系数 {meta.get('scale_factor'):.6f})")
-            print(f"Σ 节点溢流量           : "
-                  f"{meta.get('total_node_flood_in_rate_m3'):,.3f} m3")
-            print(f"Σ 排放口出流量         : "
-                  f"{meta.get('total_outfall_outflow_in_rate_m3'):,.3f} m3")
-            print(f"Σ 总水量               : "
-                  f"{meta.get('total_volume_in_rate_m3'):,.3f} m3")
-            print(f"时间口径               : {meta.get('rate_time_basis')}")
+            print_rate_summary(without_sub_path, label="不含蓄水：溢流+出水口排放")
+            print()
+            print_rate_summary(with_sub_path, label="含蓄水：+汇水区地表蓄水")
     except (ValueError, FileNotFoundError, SurfaceStorageError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -3,7 +3,8 @@ from __future__ import annotations
 """这个文件是项目当前阶段的“总入口脚本”。
 
 1. swmm_runner: 负责运行 SWMM，得到 rpt/out
-2. swmm_rpt   : 负责解析 rpt（+ inp），得到结构化结果 rate_*.json
+2. swmm_rpt   : 负责解析 rpt（+ inp），得到结构化结果 rate_*.json（两个口径各一份）
+3. get_chi    : 负责生成虚拟降雨雨型 chi_*.txt
 
 用法
 ----
@@ -17,25 +18,47 @@ from __future__ import annotations
     # C. 指定 JSON 输出位置与地表蓄水口径
     python main.py --report LC_MANUAL_23.rpt -o check\\out\\rate_demo.json
     python main.py --report LC_MANUAL_23.rpt --surface-storage off
+    python main.py --report LC_MANUAL_23.rpt --no-chi      # 不生成虚拟降雨雨型
+
+输出（都在 data/results 下，除 -o 指定的除外）
+----
+1. rate_<主干名>.json          —— rate 表**只算离开管网的水**（不含汇水区地表蓄水）：
+      rate = (该节点累计溢流量 + 该节点排放口排放量) / (sim_hours * 3600)
+      溢流 = Node Flooding Summary（节点漫出的水）；
+      排放量 = Outfall Loading Summary（sea*/mount* 排走的水，例如 sea41）。
+      留在汇水区地表的 Final Storage **不在这里算** —— 它由下面的虚拟降雨代表。
+2. rate_<主干名>_with_sub.json —— rate 表再加上汇水区地表蓄水：
+      rate = (节点累计溢流量 + 排放口累计排放量 + Σ关联汇水区地表蓄水量)
+             / (sim_hours * 3600)
+   两个文件的节点清单与坐标完全相同，只有 rate 的取值不同，且水量互补：
+   ① + ③ = ②（Σrate×时长 加 虚拟降雨面雨量 = 含蓄水口径总量），不重不漏。
+3. chi_<主干名>.txt            —— 虚拟降雨雨型（芝加哥雨型，[TIMESERIES] 文本）：
+      雨量 = .rpt 的 Runoff Quantity Continuity -> Final Storage（mm 列）
+      历时 = 模拟时间（.inp 的 [OPTIONS] 起止时间之差）
+      时序名沿用 get_chi 的 TS<历时>H<雨量>_CHI，例如 TS1H25_CHI。
 
 输出的 JSON 结构（rate 为合并后的单一列表）：
     {
       "rate":     [ {"node": ..., "rate": ..., "coordinate": ...}, ... ],
       "original": { ...解析明细 + 汇水区地表蓄水量 + 核对信息... }
     }
-    rate 的每个元素对应一个出水口节点，总水量 =
-        节点累计溢流量 + 排放口累计排放量 + Σ(关联汇水区地表蓄水量)
     详见 tools/swmm_rpt.py 的模块文档与 check/out/RATE_JSON_GUIDE.md。
 """
 
 import argparse
-import json
+import re
 import sys
 from pathlib import Path
 
 from tools.config import RESULTS_DIR, SWMM_DATA_DIR
-from tools.swmm_rpt import parse_report, write_output_file
+from tools.get_chi import DEFAULT_DATE as CHI_DEFAULT_DATE
+from tools.get_chi import write_chicago_file
+from tools.swmm_rpt import (load_inp, print_rate_summary,
+                            read_runoff_final_storage, write_output_files)
 from tools.swmm_runner import run_simulation
+
+# .inp 里 START_DATE 的形状（MM/DD/YYYY，SWMM 的写法）
+_SWMM_DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
 
 
 def resolve_report_path(report: str | Path) -> Path:
@@ -67,7 +90,10 @@ def parse_args() -> argparse.Namespace:
 	parser.add_argument("--rpt-name", help="Custom report filename when running SWMM")
 	parser.add_argument("--out-name", help="Custom output filename when running SWMM")
 	parser.add_argument("--force", action="store_true", help="Overwrite existing report/output files")
-	parser.add_argument("-o", "--out", help="rate JSON 输出路径（默认 data/results/rate_<主干名>.json）")
+	parser.add_argument("-o", "--out",
+	                    help="不含汇水区蓄水那份 JSON 的路径；含蓄水那份由它派生"
+	                         "（主干名后加 _with_sub）。默认 data/results/"
+	                         "rate_<主干名>.json 与 rate_<主干名>_with_sub.json")
 	parser.add_argument(
 		"--surface-storage",
 		choices=("auto", "mass_balance", "off"),
@@ -85,27 +111,81 @@ def parse_args() -> argparse.Namespace:
 		help="把全部真实排放口（out1/out2…）也放进 rate 表。"
 		     "默认只保留被汇水区指定为 Outlet 的点 + 虚拟出水口 sea*/mount*",
 	)
-	parser.add_argument("-q", "--quiet", action="store_true", help="只打印 JSON 路径")
+	parser.add_argument(
+		"--no-chi",
+		action="store_true",
+		help="不生成虚拟降雨雨型 chi_<主干名>.txt"
+		     "（默认会用 .rpt 的 Runoff Final Storage + 模拟时长生成）",
+	)
+	parser.add_argument("-q", "--quiet", action="store_true", help="只打印输出文件路径")
 	return parser.parse_args()
 
 
-def _print_summary(json_path: Path, inp_path: Path, report_path: Path) -> None:
-	"""打印与 tools/swmm_rpt.py 命令行一致的汇总信息。"""
-	data = json.loads(Path(json_path).read_text(encoding="utf-8"))
-	meta = data["original"]["surface_storage_meta"]
+def build_virtual_rainfall(
+	inp_path: Path,
+	report_path: Path,
+) -> tuple[Path | None, str]:
+	"""生成虚拟降雨雨型 chi_<主干名>.txt，返回 (写出的路径或 None, 说明文字)。
+
+	口径（方案.md 的“溢流+虚拟降雨”）：
+	  * 雨量 = .rpt 的 Runoff Quantity Continuity -> Final Storage 的 **mm** 列
+	    （即汇水区在模拟结束时仍滞留在地表的水量，按汇水面积折算成雨深）
+	  * 历时 = 模拟时间（.inp 的 [OPTIONS] 起止时间之差，sim_hours）
+	  * 文件 = data/results/chi_<inp主干名>.txt，由 tools/get_chi.py 生成
+	    （芝加哥雨型，r=0.4、5 min 步长，参数不动）
+
+	注意：这里只生成雨型文件，**不会**去改任何 .inp。
+	取不到数或写文件失败时不抛异常，返回 (None, 原因)，以免影响已写好的 rate JSON。
+	"""
+	report_path = Path(report_path)
+	ha_m, mm = read_runoff_final_storage(report_path)
+	if mm is None:
+		reason = (f"{report_path.name} 的 Runoff Quantity Continuity 里找不到 Final Storage")
+		print(f"[warn] {reason}，已跳过虚拟降雨雨型的生成。", file=sys.stderr)
+		return None, reason
+	if mm <= 0:
+		reason = f"Final Storage = {mm} mm（<=0），没有可转化的虚拟降雨"
+		print(f"[warn] {reason}，已跳过生成。", file=sys.stderr)
+		return None, reason
+
+	inp = load_inp(inp_path)
+	date_str = inp.options.get("START_DATE") or CHI_DEFAULT_DATE
+	if not _SWMM_DATE_RE.match(date_str):
+		date_str = CHI_DEFAULT_DATE
+	out_path = RESULTS_DIR / f"chi_{Path(inp_path).stem}.txt"
+
+	try:
+		written = write_chicago_file(
+			inp.sim_hours, mm, out_path=out_path, date_str=date_str, quiet=True)
+	except (OSError, ValueError) as exc:
+		reason = f"生成虚拟降雨雨型失败：{exc}"
+		print(f"[warn] {reason}（rate JSON 已正常写出）。", file=sys.stderr)
+		return None, reason
+
+	note = (f"雨量 {mm:.3f} mm = Runoff Final Storage {ha_m:,.3f} hectare-m，"
+	        f"历时 {inp.sim_hours:g} h，日期 {date_str}")
+	return written, note
+
+
+def _print_summary(
+	without_sub_path: Path,
+	with_sub_path: Path,
+	inp_path: Path,
+	report_path: Path,
+	chi_path: Path | None,
+	chi_note: str,
+) -> None:
+	"""打印与 tools/swmm_rpt.py 命令行一致的汇总信息（两个 JSON + 虚拟降雨）。"""
 	print(f"INP : {inp_path}")
 	print(f"RPT : {report_path}")
-	print(f"JSON: {json_path}")
-	print(f"rate 条目数            : {len(data['rate'])}")
-	print(f"  其中 junction 类型    : {meta.get('n_junctions_in_rate')}")
-	print(f"  其中 outfall 类型     : {meta.get('n_outfall_type_in_rate')}")
-	print(f"  按 sea*/mount*/vir* 命名: {meta.get('n_virtual_by_name_prefix')}")
-	print(f"Σ 汇水区地表蓄水量     : {meta.get('total_surface_storage_in_rate_m3'):,.3f} m3 "
-	      f"(反推 {meta.get('raw_total_m3'):,.3f} m3, 缩放系数 {meta.get('scale_factor'):.6f})")
-	print(f"Σ 节点溢流量           : {meta.get('total_node_flood_in_rate_m3'):,.3f} m3")
-	print(f"Σ 排放口出流量         : {meta.get('total_outfall_outflow_in_rate_m3'):,.3f} m3")
-	print(f"Σ 总水量               : {meta.get('total_volume_in_rate_m3'):,.3f} m3")
-	print(f"时间口径               : {meta.get('rate_time_basis')}")
+	print_rate_summary(without_sub_path, label="不含蓄水：溢流+出水口排放")
+	print()
+	print_rate_summary(with_sub_path, label="含蓄水：+汇水区地表蓄水")
+	print()
+	if chi_path is not None:
+		print(f"CHI : {chi_path}   # 虚拟降雨雨型：{chi_note}")
+	else:
+		print(f"CHI : 未生成（{chi_note}）")
 
 
 def _setup_console() -> None:
@@ -126,9 +206,11 @@ def _setup_console() -> None:
 def main() -> int:
     # 1. 解析命令行参数
     # 2. 按 report 模式或 run+parse 模式处理
-    # 3. 用 write_output_file 生成 rate_<inp主干名>.json（rate + original 两部分）
+    # 3. write_output_files 生成两个 rate JSON（flood_only + with_sub）
+    # 4. get_chi 生成虚拟降雨雨型 chi_<主干名>.txt
     _setup_console()
     args = parse_args()
+    chi_path: Path | None = None
 
     try:
         if args.report:
@@ -174,26 +256,40 @@ def main() -> int:
             inp_path = result.inp_path
             report_path = result.rpt_path
 
-        # 统一出口：解析 INP + RPT，写出 rate_*.json。
-        json_path = write_output_file(
+        # 统一出口：解析 INP + RPT，写出两个 rate JSON
+        #   rate_<主干名>.json          —— 溢流量 + 出水口排放量（不含汇水区地表蓄水）
+        #   rate_<主干名>_with_sub.json —— 再加上 Σ关联汇水区地表蓄水量
+        without_sub_path, with_sub_path = write_output_files(
             inp_path, report_path, out_path=args.out,
             surface_storage=args.surface_storage,
             scale_storage_to_reported=not args.no_scale_storage,
             include_real_outfalls=args.include_real_outfalls,
         )
 
+        # 解析完报告后，用 Runoff Final Storage 作雨量、模拟时长作历时，
+        # 生成虚拟降雨雨型 data/results/chi_<主干名>.txt。
+        chi_note = "已用 --no-chi 关闭"
+        if not args.no_chi:
+            chi_path, chi_note = build_virtual_rainfall(
+                Path(inp_path), Path(report_path))
+
     except (FileNotFoundError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     except OSError as exc:
-        print(f"Failed to write JSON file: {exc}", file=sys.stderr)
+        print(f"Failed to write output files: {exc}", file=sys.stderr)
         return 2
 
     if args.quiet:
-        print(f"JSON saved: {json_path}")
+        print(f"JSON saved: {without_sub_path}")
+        print(f"JSON saved: {with_sub_path}")
+        if chi_path is not None:
+            print(f"CHI  saved: {chi_path}")
     else:
-        _print_summary(Path(json_path), Path(inp_path), Path(report_path))
-        print(f"\nJSON saved: {json_path}")
+        _print_summary(without_sub_path, with_sub_path,
+                       Path(inp_path), Path(report_path), chi_path, chi_note)
+        print(f"\nJSON saved: {without_sub_path}")
+        print(f"JSON saved: {with_sub_path}")
     return 0
 
 
