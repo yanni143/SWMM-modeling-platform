@@ -239,6 +239,10 @@ export function latestLisfloodInputUrl(versionId: string): string {
   return `${apiBaseUrl}/api/model-versions/${versionId}/latest-result/lisflood-input`
 }
 
+export function latestLisfloodVirtualRainfallUrl(versionId: string): string {
+  return `${apiBaseUrl}/api/model-versions/${versionId}/latest-result/lisflood-virtual-rainfall`
+}
+
 export function fetchLatestVersionResultLayers(versionId: string): Promise<VersionResultLayers> {
   return request(`/api/model-versions/${versionId}/latest-result/layers`)
 }

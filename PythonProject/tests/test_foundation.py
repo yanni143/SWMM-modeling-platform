@@ -6,9 +6,10 @@ from types import SimpleNamespace
 import models  # noqa: F401
 from Controller.controller import app
 from database.base import Base
+from Service.LisfloodExportService import LisfloodExportService
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
 from swmm_core.lisflood_rate import build_without_sub
-from swmm_core.rpt_coupling import build_without_sub_source_data
+from swmm_core.rpt_coupling import build_without_sub_source_data, read_runoff_final_storage
 from swmm_core.result_geojson import latest_time_step_layers
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
@@ -80,6 +81,11 @@ class FoundationTests(unittest.TestCase):
         self.assertIn("/api/runs/{run_id}/lisflood-input", paths)
         self.assertIn(
             "/api/model-versions/{version_id}/latest-result/lisflood-input", paths
+        )
+        self.assertIn("/api/runs/{run_id}/lisflood-virtual-rainfall", paths)
+        self.assertIn(
+            "/api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall",
+            paths,
         )
         self.assertNotIn(
             "/api/model-versions/{version_id}/latest-result/depth-timeline", paths
@@ -482,3 +488,26 @@ Rainfall01 01/01/2025 00:00:00 0
         for node, row in expected_by_node.items():
             self.assertEqual(actual_by_node[node]["coordinate"], row["coordinate"])
             self.assertEqual(actual_by_node[node]["rate"], row["rate"])
+
+    def test_lisflood_virtual_rainfall_uses_report_final_storage(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "coupling" / "lc"
+        _, expected_mm = read_runoff_final_storage(fixture / "LC_MANUAL_23.rpt")
+        self.assertIsNotNone(expected_mm)
+        with tempfile.TemporaryDirectory() as directory:
+            output = LisfloodExportService().write_virtual_rainfall(
+                fixture / "LC_MANUAL_23.inp",
+                fixture / "LC_MANUAL_23.rpt",
+                directory,
+                "LC_MANUAL_23",
+            )
+            self.assertIsNotNone(output)
+            content = output.read_text(encoding="utf-8")
+
+        values = [
+            float(line.split()[-1])
+            for line in content.splitlines()
+            if line.startswith("TS")
+        ]
+        self.assertEqual(len(values), 13)
+        self.assertEqual(values[-1], 0.0)
+        self.assertAlmostEqual(sum(values[:-1]) * 5 / 60, expected_mm, places=3)

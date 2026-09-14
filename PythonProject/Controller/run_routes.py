@@ -200,3 +200,28 @@ def download_latest_lisflood_input(
         return _stream_lisflood_artifact(service, artifact)
     except Exception as exc:
         raise _translate(exc) from exc
+
+
+@router.get("/runs/{run_id}/lisflood-virtual-rainfall")
+def download_lisflood_virtual_rainfall(
+    run_id: UUID, session: Session = Depends(get_db)
+) -> StreamingResponse:
+    try:
+        service = SimulationService()
+        return _stream_lisflood_artifact(
+            service, service.get_lisflood_virtual_rainfall_artifact(session, run_id)
+        )
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall")
+def download_latest_lisflood_virtual_rainfall(
+    version_id: UUID, session: Session = Depends(get_db)
+) -> StreamingResponse:
+    try:
+        service = SimulationService()
+        _, artifact = service.get_latest_lisflood_virtual_rainfall_artifact(session, version_id)
+        return _stream_lisflood_artifact(service, artifact)
+    except Exception as exc:
+        raise _translate(exc) from exc

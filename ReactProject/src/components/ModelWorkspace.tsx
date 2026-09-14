@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
 import '@/assets/css/ModelWorkspace.css';
-import { latestLisfloodInputUrl } from '@/api/models';
+import {
+  latestLisfloodInputUrl,
+  latestLisfloodVirtualRainfallUrl,
+} from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
 import ParameterTuning from './ParameterTuning';
 
@@ -140,12 +143,20 @@ export default function ModelWorkspace() {
             ))}
           </select>
           {store.activeResultVersionId && (
-            <a
-              className="run-action lisflood-download"
-              href={latestLisfloodInputUrl(store.activeResultVersionId)}
-            >
-              下载 LISFLOOD 点源输入
-            </a>
+            <>
+              <a
+                className="run-action lisflood-download"
+                href={latestLisfloodInputUrl(store.activeResultVersionId)}
+              >
+                下载 LISFLOOD 点源输入
+              </a>
+              <a
+                className="run-action lisflood-download"
+                href={latestLisfloodVirtualRainfallUrl(store.activeResultVersionId)}
+              >
+                下载 LISFLOOD 虚拟降雨
+              </a>
+            </>
           )}
         </section>
       )}

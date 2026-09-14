@@ -937,6 +937,12 @@ def _read_report(report_path: str | Path) -> tuple[Path, str]:
     return path, _read_text_file(path)
 
 
+def read_runoff_final_storage(rpt_path: str | Path) -> tuple[float | None, float | None]:
+    """Read official runoff final storage from a SWMM report as ``(ha-m, mm)``."""
+    _, rpt_text = _read_report(rpt_path)
+    return _reported_runoff_final_storage(rpt_text)
+
+
 def _extract_flow_unit(text: str) -> str:
     """从 Analysis Options 章节读取报告使用的流量单位。"""
 

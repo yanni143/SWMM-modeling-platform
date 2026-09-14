@@ -4,7 +4,7 @@
 
 ## 1. 系统约束
 
-- 系统是固定研究区演示系统，后端启动时会初始化一个内置 SWMM 模型。
+- 系统是固定研究区系统，后端启动时会幂等初始化 LC、JJ 两个研究区及各自的基线 V1。
 - 不提供用户上传 INP 文件的接口。
 - 参数调整不会覆盖原版本，而是以指定版本为父版本创建一个新版本。
 - 同一版本允许执行多次模拟。数据库和 MinIO 保留每次运行，但面向用户的历史结果列表只展示每个版本最新一次成功运行。
@@ -28,6 +28,8 @@ http://localhost:8000
 
 - 普通请求和响应：`application/json`
 - INP 下载响应：`text/plain; charset=utf-8`
+- LISFLOOD 点源输入下载响应：`application/json`，文件名为 `rate_<研究区>_without_sub.json`
+- LISFLOOD 虚拟降雨下载响应：`text/plain; charset=utf-8`，文件名为 `chi_<研究区>.txt`
 - ID：标准 UUID 字符串，例如 `00000000-0000-0000-0000-000000000101`
 - 时间：ISO 8601 字符串，例如 `2026-08-11T05:59:30.123456Z`
 - GeoJSON 坐标：地图输出统一为 `EPSG:4326`，坐标顺序为 `[longitude, latitude]`
@@ -100,6 +102,10 @@ FastAPI 默认提供：
 | `GET` | `/api/model-versions/{version_id}/latest-result/timeline` | 获取完整结果时间轴、字段范围和单位元数据 |
 | `GET` | `/api/model-versions/{version_id}/latest-result/steps/{time_index}` | 获取指定时间步的全部结果图层 |
 | `GET` | `/api/runs/{run_id}/layers` | 按具体运行 ID 获取地图结果图层 |
+| `GET` | `/api/runs/{run_id}/lisflood-input` | 下载某一次运行的 LISFLOOD 点源输入 |
+| `GET` | `/api/model-versions/{version_id}/latest-result/lisflood-input` | 下载版本最近一次成功运行的 LISFLOOD 点源输入 |
+| `GET` | `/api/runs/{run_id}/lisflood-virtual-rainfall` | 下载某一次运行的 LISFLOOD 虚拟降雨 |
+| `GET` | `/api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall` | 下载版本最近一次成功运行的 LISFLOOD 虚拟降雨 |
 
 ## 4. 通用数据结构
 
@@ -677,7 +683,7 @@ Content-Disposition: attachment; filename="model-v2.inp"
 
 `POST /api/model-versions/{version_id}/runs`
 
-用途：下载版本 INP、调用 SWMM、解析 OUT 文件、保存输入/输出/报告/可视化产物并返回地图结果。
+用途：下载版本 INP、调用 SWMM、解析 OUT/RPT 文件、保存输入/输出/报告/可视化产物，并生成方案三所需的 LISFLOOD 点源输入与虚拟降雨。
 
 路径参数：`version_id`，UUID。无请求体。
 
@@ -746,6 +752,8 @@ Content-Disposition: attachment; filename="model-v2.inp"
 | `raw_out` | SWMM 原始 OUT 文件 |
 | `report` | SWMM RPT 报告 |
 | `visual` | 完整时间步 GeoJSON |
+| `lisflood` | 不含汇水区滞蓄的 LISFLOOD 点源输入 JSON |
+| `lisflood_virtual_rainfall` | 由 RPT Final Storage 生成的 LISFLOOD 虚拟降雨 TXT |
 
 可能错误：`422` 版本不存在、运行失败或 OUT 未生成；`503` MinIO 不可用；`500` 未分类运行服务错误。
 
@@ -926,6 +934,88 @@ GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/times
 
 可能错误：`422` 运行记录不存在；`503` MinIO 不可用；UUID 格式错误时返回 FastAPI `422`。
 
+### 7.6 下载 LISFLOOD 方案三输入
+
+方案三将 SWMM 结果拆分为两份**必须配套使用**的数据：
+
+1. 点源输入只包含节点溢流和出水口排放，不包含汇水区地表滞蓄；
+2. 虚拟降雨将 `.rpt` 中 `Runoff Quantity Continuity → Final Storage` 的面雨深等效为芝加哥雨型，代表被从点源中剥离的汇水区地表滞蓄。
+
+不要将虚拟降雨与含汇水区滞蓄的点源流量表一起使用，否则会重复计算这部分水量。当前 API 不生成 `rate_*_with_sub.json`。
+
+#### 7.6.1 下载点源输入
+
+精确指定一次运行：
+
+`GET /api/runs/{run_id}/lisflood-input`
+
+按工程版本自动选取最近一次成功运行：
+
+`GET /api/model-versions/{version_id}/latest-result/lisflood-input`
+
+两个接口的响应内容相同，区别仅在于定位运行的方式。响应示例：
+
+```text
+Content-Type: application/json
+Content-Disposition: attachment; filename="rate_JJ_MANUAL_7_without_sub.json"
+```
+
+JSON 结构：
+
+```json
+{
+  "rate": [
+    {
+      "node": "J181",
+      "rate": 3.550278,
+      "coordinate": [396826.8302363448, 2184008.14446223]
+    }
+  ]
+}
+```
+
+`rate` 单位为 **m³/s**，计算方式为节点累计溢流体积与排放口累计出流体积之和，除以模拟总时长。RPT 体积列使用 `10^6 ltr`，后端先乘以 `1000` 转为 m³，再除以 `sim_hours × 3600`。
+
+#### 7.6.2 下载虚拟降雨
+
+精确指定一次运行：
+
+`GET /api/runs/{run_id}/lisflood-virtual-rainfall`
+
+按工程版本自动选取最近一次成功运行：
+
+`GET /api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall`
+
+响应示例：
+
+```text
+Content-Type: text/plain; charset=utf-8
+Content-Disposition: attachment; filename="chi_JJ_MANUAL_7.txt"
+```
+
+文件为可直接使用的 SWMM `[TIMESERIES]` 文本。例如：
+
+```text
+[TIMESERIES]
+;;Name           Date       Time       Value
+TS1H29_CHI       07/15/2025 00:00:00  21.4659
+TS1H29_CHI       07/15/2025 00:05:00  24.1768
+...
+TS1H29_CHI       07/15/2025 01:00:00  0.0000
+```
+
+规则：
+
+- 总雨量：RPT 的 `Final Storage` 的 `mm` 列；
+- 降雨历时：INP `[OPTIONS]` 的模拟起止时间之差；
+- 日期：INP 的 `START_DATE`；
+- 雨强单位：`mm/h`；步长为 5 分钟，峰值比例 `r=0.4`；
+- 时序名：`TS<历时小时>H<雨量整数部分>_CHI`。
+
+如果 RPT 中缺少 `Final Storage`，或其值小于等于零，SWMM 运行仍会成功，点源输入仍可下载；虚拟降雨 artifact 不会生成，对应虚拟降雨下载接口返回 `422`。历史运行在此功能上线前没有该 artifact，也需要重新运行后才能下载。
+
+可能错误：`422` 运行/版本不存在、没有成功运行或该运行没有可用虚拟降雨；`503` MinIO 不可用。
+
 ## 8. 推荐前端调用流程
 
 ### 8.1 初始化
@@ -1001,4 +1091,14 @@ curl "http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000
 ```bash
 curl -OJ \
   http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/download
+```
+
+下载当前版本最新成功运行的 LISFLOOD 方案三输入：
+
+```bash
+curl -OJ \
+  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/lisflood-input
+
+curl -OJ \
+  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/lisflood-virtual-rainfall
 ```
