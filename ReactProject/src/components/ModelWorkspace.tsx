@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import '@/assets/css/ModelWorkspace.css';
+import { latestLisfloodInputUrl } from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
 import ParameterTuning from './ParameterTuning';
 
@@ -32,7 +33,7 @@ export default function ModelWorkspace() {
       <div className="workspace-heading">
         <div>
           <p className="workspace-kicker">
-            FIXED STUDY AREA / 01
+            SWMM STUDY AREA
           </p>
           <h2>{selected?.name || '模型工作台'}</h2>
         </div>
@@ -52,6 +53,24 @@ export default function ModelWorkspace() {
       )}
       {selected && (
         <section className="study-area-summary">
+          {store.models.length > 1 && (
+            <label className="study-area-picker">
+              <span>研究区</span>
+              <select
+                className="ledger-select"
+                value={store.selectedModelId ?? ''}
+                aria-label="选择研究区"
+                disabled={store.running}
+                onChange={(event) => event.target.value && void store.selectModel(event.target.value)}
+              >
+                {store.models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="model-facts">
             <div>
               <span>状态</span>
@@ -120,6 +139,14 @@ export default function ModelWorkspace() {
               </option>
             ))}
           </select>
+          {store.activeResultVersionId && (
+            <a
+              className="run-action lisflood-download"
+              href={latestLisfloodInputUrl(store.activeResultVersionId)}
+            >
+              下载 LISFLOOD 点源输入
+            </a>
+          )}
         </section>
       )}
       <button

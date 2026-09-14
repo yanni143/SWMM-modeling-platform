@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["config"]
+py-modules = ["config", "study_areas"]
 
 [tool.setuptools.packages.find]
 where = ["."]

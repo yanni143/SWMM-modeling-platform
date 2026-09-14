@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from minio.error import S3Error
 from sqlalchemy.orm import Session
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
@@ -45,7 +46,9 @@ def run_version(version_id: UUID, session: Session = Depends(get_db)) -> RunResp
 
 
 @router.get("/model-results", response_model=list[ModelResultSummary])
-def list_model_results(session: Session = Depends(get_db)) -> list[ModelResultSummary]:
+def list_model_results(
+    model_id: UUID | None = Query(default=None), session: Session = Depends(get_db)
+) -> list[ModelResultSummary]:
     try:
         return [
             ModelResultSummary(
@@ -55,7 +58,9 @@ def list_model_results(session: Session = Depends(get_db)) -> list[ModelResultSu
                 created_at=run.created_at,
                 finished_at=run.finished_at,
             )
-            for run, version in SimulationService().list_latest_successful_results(session)
+            for run, version in SimulationService().list_latest_successful_results(
+                session, model_id
+            )
         ]
     except Exception as exc:
         raise _translate(exc) from exc
@@ -155,5 +160,43 @@ def get_run_layers(run_id: UUID, session: Session = Depends(get_db)) -> list[Geo
             GeoJsonLayer.model_validate(layer)
             for layer in SimulationService().list_layer_artifacts(session, run_id)
         ]
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+def _stream_lisflood_artifact(service: SimulationService, artifact) -> StreamingResponse:
+    response = service.storage.client.get_object(artifact.bucket, artifact.object_key)
+
+    def stream_object():
+        try:
+            yield from response.stream(amt=1024 * 1024)
+        finally:
+            response.close()
+            response.release_conn()
+
+    return StreamingResponse(
+        stream_object(),
+        media_type=artifact.content_type or "application/json",
+        headers={"Content-Disposition": f'attachment; filename="{artifact.filename}"'},
+    )
+
+
+@router.get("/runs/{run_id}/lisflood-input")
+def download_lisflood_input(run_id: UUID, session: Session = Depends(get_db)) -> StreamingResponse:
+    try:
+        service = SimulationService()
+        return _stream_lisflood_artifact(service, service.get_lisflood_artifact(session, run_id))
+    except Exception as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/model-versions/{version_id}/latest-result/lisflood-input")
+def download_latest_lisflood_input(
+    version_id: UUID, session: Session = Depends(get_db)
+) -> StreamingResponse:
+    try:
+        service = SimulationService()
+        _, artifact = service.get_latest_lisflood_artifact(session, version_id)
+        return _stream_lisflood_artifact(service, artifact)
     except Exception as exc:
         raise _translate(exc) from exc

@@ -4,10 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import models  # noqa: F401
-from config import get_settings
 from Controller.controller import app
 from database.base import Base
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
+from swmm_core.lisflood_rate import build_without_sub
+from swmm_core.rpt_coupling import build_without_sub_source_data
 from swmm_core.result_geojson import latest_time_step_layers
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
@@ -24,6 +25,7 @@ from Tools.InpTools.InpRainfallEditor import (
     build_rainfall_options,
 )
 from Tools.InpTools.InpValidator import InvalidInpFile, validate_inp_file
+from study_areas import STUDY_AREA_SEEDS
 
 
 class _Stat:
@@ -75,6 +77,10 @@ class FoundationTests(unittest.TestCase):
         self.assertIn(
             "/api/model-versions/{version_id}/latest-result/steps/{time_index}", paths
         )
+        self.assertIn("/api/runs/{run_id}/lisflood-input", paths)
+        self.assertIn(
+            "/api/model-versions/{version_id}/latest-result/lisflood-input", paths
+        )
         self.assertNotIn(
             "/api/model-versions/{version_id}/latest-result/depth-timeline", paths
         )
@@ -82,9 +88,11 @@ class FoundationTests(unittest.TestCase):
             "/api/model-versions/{version_id}/latest-result/depth-steps/{time_index}", paths
         )
 
-    def test_builtin_inp_is_valid_and_upload_route_is_absent(self) -> None:
-        validation = validate_inp_file(get_settings().resolved_fixed_inp_path)
-        self.assertIn("OPTIONS", validation.sections)
+    def test_study_area_inputs_are_valid_and_upload_route_is_absent(self) -> None:
+        self.assertEqual({seed.name for seed in STUDY_AREA_SEEDS}, {"LC", "JJ"})
+        for seed in STUDY_AREA_SEEDS:
+            validation = validate_inp_file(seed.inp_path)
+            self.assertIn("OPTIONS", validation.sections)
         routes_source = (
             Path(__file__).parents[1] / "Controller" / "model_routes.py"
         ).read_text(encoding="utf-8")
@@ -366,10 +374,10 @@ J1 0 2
             {"start_seconds": 600, "duration_seconds": 3000, "total_rainfall_mm": 120.0},
             7200,
         )
-        self.assertIn("RG1 INTENSITY 0:01 1.0 TIMESERIES Rainfall01", adjusted)
+        self.assertIn("RG1 INTENSITY 0:05 1.0 TIMESERIES Rainfall01", adjusted)
         self.assertIn("TIDE1 01/01/2025 00:00:00 0.5", adjusted)
         self.assertIn(
-            ";@DESIGN_RAIN schema=2 formula=haikou_chicago start_s=600 "
+            ";@DESIGN_RAIN schema=2 formula=runswmm_chicago start_s=600 "
             "duration_s=3000 total_mm=120",
             adjusted,
         )
@@ -386,20 +394,20 @@ J1 0 2
         self.assertEqual(options["duration_seconds"], 3000)
         self.assertEqual(options["end_seconds"], 3600)
         self.assertAlmostEqual(options["total_rainfall_mm"], 120.0)
-        self.assertEqual(options["formula"], "haikou_chicago")
+        self.assertEqual(options["formula"], "runswmm_chicago")
 
     def test_chicago_series_has_dry_periods_and_expected_peak(self) -> None:
         series = build_chicago_series(600, 3600, 120.0, 7200)
         self.assertEqual(dict(series)[0], 0.0)
         self.assertEqual(dict(series)[4200], 0.0)
         wet = [value for offset, value in series if 600 <= offset < 4200]
-        depth = sum(value for value in wet) * 60.0 / 3600.0
+        depth = sum(value for value in wet) * 300.0 / 3600.0
         self.assertAlmostEqual(depth, 120.0, places=8)
         peak_offset = max(
             (offset for offset, value in series if 600 <= offset < 4200),
             key=lambda offset: dict(series)[offset],
         )
-        self.assertLessEqual(abs(peak_offset - (600 + int(0.43 * 3600))), 60)
+        self.assertLessEqual(abs(peak_offset - (600 + int(0.4 * 3600))), 300)
         self.assertGreater(max(wet), 0.0)
 
     def test_design_rainfall_ignores_metadata_without_schema_2(self) -> None:
@@ -419,8 +427,8 @@ Rainfall01 01/01/2025 00:11:00 18
         options = build_rainfall_options(INPParser.parse(content), 7200)
 
         self.assertEqual(options["start_seconds"], 600)
-        self.assertEqual(options["duration_seconds"], 120)
-        self.assertAlmostEqual(options["total_rainfall_mm"], 0.5)
+        self.assertEqual(options["duration_seconds"], 360)
+        self.assertAlmostEqual(options["total_rainfall_mm"], 2.5)
         self.assertEqual(options["formula"], "existing_timeseries")
 
     def test_design_rainfall_rejects_invalid_schema_2_metadata(self) -> None:
@@ -458,3 +466,19 @@ Rainfall01 01/01/2025 00:00:00 0
                 {"start_seconds": 0, "duration_seconds": 7260, "total_rainfall_mm": 120.0},
                 7200,
             )
+
+    def test_lisflood_without_sub_matches_lc_reference_fixture(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "coupling" / "lc"
+        source = build_without_sub_source_data(
+            fixture / "LC_MANUAL_23.inp", fixture / "LC_MANUAL_23.rpt"
+        )
+        actual, _ = build_without_sub(source)
+        expected = __import__("json").loads(
+            (fixture / "rate_LC_MANUAL_23_without_sub.json").read_text(encoding="utf-8")
+        )["rate"]
+        actual_by_node = {row["node"]: row for row in actual}
+        expected_by_node = {row["node"]: row for row in expected}
+        self.assertEqual(set(actual_by_node), set(expected_by_node))
+        for node, row in expected_by_node.items():
+            self.assertEqual(actual_by_node[node]["coordinate"], row["coordinate"])
+            self.assertEqual(actual_by_node[node]["rate"], row["rate"])

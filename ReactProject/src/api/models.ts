@@ -230,8 +230,13 @@ export function runProjectVersion(versionId: string): Promise<ProjectRunResponse
   return request(`/api/model-versions/${versionId}/runs`, { method: 'POST' })
 }
 
-export function fetchModelResults(): Promise<ModelResultSummary[]> {
-  return request('/api/model-results')
+export function fetchModelResults(modelId?: string): Promise<ModelResultSummary[]> {
+  const query = modelId ? `?model_id=${encodeURIComponent(modelId)}` : ''
+  return request(`/api/model-results${query}`)
+}
+
+export function latestLisfloodInputUrl(versionId: string): string {
+  return `${apiBaseUrl}/api/model-versions/${versionId}/latest-result/lisflood-input`
 }
 
 export function fetchLatestVersionResultLayers(versionId: string): Promise<VersionResultLayers> {

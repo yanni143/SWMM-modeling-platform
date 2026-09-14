@@ -1,6 +1,5 @@
 from functools import lru_cache
 from pathlib import Path
-from uuid import UUID
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,11 +26,6 @@ class Settings(BaseSettings):
     database_name: str = "fenhuModel"
     runtime_dir: Path = PROJECT_DIR / ".runtime"
     swmm_input_crs: str = "EPSG:4549"
-    fixed_model_id: UUID = UUID("00000000-0000-0000-0000-000000000001")
-    fixed_version_id: UUID = UUID("00000000-0000-0000-0000-000000000101")
-    fixed_model_name: str = "汾湖演示研究区"
-    fixed_model_description: str = "系统内置的固定 SWMM 演示研究区"
-    fixed_inp_path: Path = PROJECT_DIR / "resources" / "fixed-study-area.inp"
 
     simulation_duration_min_seconds: int = 60
     simulation_duration_max_seconds: int = 86_400
@@ -55,13 +49,6 @@ class Settings(BaseSettings):
     @property
     def resolved_runtime_dir(self) -> Path:
         path = self.runtime_dir
-        if not path.is_absolute():
-            path = PROJECT_DIR / path
-        return path.resolve()
-
-    @property
-    def resolved_fixed_inp_path(self) -> Path:
-        path = self.fixed_inp_path
         if not path.is_absolute():
             path = PROJECT_DIR / path
         return path.resolve()

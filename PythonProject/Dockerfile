@@ -21,6 +21,7 @@ COPY storage ./storage
 COPY swmm_core ./swmm_core
 COPY resources ./resources
 COPY config.py ./config.py
+COPY study_areas.py ./study_areas.py
 
 RUN pip install --upgrade pip \
     && pip install . \
