@@ -7,6 +7,7 @@ import models  # noqa: F401
 from Controller.controller import app
 from database.base import Base
 from Service.LisfloodExportService import LisfloodExportService
+from Service.ModelService import ModelService
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
 from swmm_core.lisflood_rate import build_without_sub
 from swmm_core.rpt_coupling import build_without_sub_source_data, read_runoff_final_storage
@@ -71,6 +72,7 @@ class FoundationTests(unittest.TestCase):
 
     def test_version_result_routes_are_exposed(self) -> None:
         paths = app.openapi()["paths"]
+        self.assertIn("/api/study-areas/latest-model-versions", paths)
         self.assertIn("/api/model-results", paths)
         self.assertIn("/api/model-versions/{version_id}/latest-result/layers", paths)
         self.assertIn("/api/model-versions/{version_id}/latest-result/timeseries", paths)
@@ -92,6 +94,39 @@ class FoundationTests(unittest.TestCase):
         )
         self.assertNotIn(
             "/api/model-versions/{version_id}/latest-result/depth-steps/{time_index}", paths
+        )
+
+    def test_latest_study_area_versions_use_seed_order_and_highest_version(self) -> None:
+        lc_seed, jj_seed = STUDY_AREA_SEEDS
+        lc_model = SimpleNamespace(id=lc_seed.model_id)
+        jj_model = SimpleNamespace(id=jj_seed.model_id)
+        lc_version = SimpleNamespace(id=lc_seed.version_id, version=3)
+        jj_version = SimpleNamespace(id=jj_seed.version_id, version=2)
+        session = SimpleNamespace(
+            execute=lambda _: SimpleNamespace(
+                all=lambda: [(jj_model, jj_version), (lc_model, lc_version)]
+            )
+        )
+        service = object.__new__(ModelService)
+
+        result = service.list_latest_study_area_versions(session)
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "study_area": "LC",
+                    "model_id": lc_seed.model_id,
+                    "version_id": lc_seed.version_id,
+                    "version": 3,
+                },
+                {
+                    "study_area": "JJ",
+                    "model_id": jj_seed.model_id,
+                    "version_id": jj_seed.version_id,
+                    "version": 2,
+                },
+            ],
         )
 
     def test_study_area_inputs_are_valid_and_upload_route_is_absent(self) -> None:

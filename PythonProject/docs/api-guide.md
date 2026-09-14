@@ -87,6 +87,7 @@ FastAPI 默认提供：
 | --- | --- | --- |
 | `GET` | `/health` | 检查数据库和 MinIO 状态 |
 | `GET` | `/api/models` | 获取固定研究区模型列表 |
+| `GET` | `/api/study-areas/latest-model-versions` | 获取 LC、JJ 两个研究区各自最新的版本 ID |
 | `GET` | `/api/models/{model_id}` | 获取模型详情 |
 | `GET` | `/api/models/{model_id}/versions` | 获取模型的全部版本 |
 | `GET` | `/api/model-versions/{version_id}/sections` | 获取版本中的 INP section 摘要 |
@@ -218,11 +219,45 @@ FastAPI 默认提供：
 
 ## 6. 模型与版本接口
 
-### 6.1 获取模型列表
+### 6.1 获取研究区最新版本
+
+`GET /api/study-areas/latest-model-versions`
+
+用途：供 LISFLOOD 获取 LC、JJ 两个内置研究区当前最新的模型版本。最新版本按该研究区的最大版本号（`version`）确定；接口稳定按 `LC`、`JJ` 顺序返回。取得 `version_id` 后，可调用对应的 `latest-result/lisflood-input` 和 `latest-result/lisflood-virtual-rainfall` 接口下载输入数据。
+
+请求：无参数、无请求体。
+
+响应：`200 OK`，返回 `StudyAreaLatestVersion[]`。
+
+```json
+[
+  {
+    "study_area": "LC",
+    "model_id": "10000000-0000-0000-0000-000000000001",
+    "version_id": "10000000-0000-0000-0000-000000000101",
+    "version": 1
+  },
+  {
+    "study_area": "JJ",
+    "model_id": "20000000-0000-0000-0000-000000000001",
+    "version_id": "20000000-0000-0000-0000-000000000101",
+    "version": 1
+  }
+]
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `study_area` | string | 稳定的研究区编码：`LC` 或 `JJ` |
+| `model_id` | UUID | 研究区模型 ID |
+| `version_id` | UUID | 后续 LISFLOOD 下载接口所需的版本 ID |
+| `version` | integer | 该研究区当前最新的版本号 |
+
+### 6.2 获取模型列表
 
 `GET /api/models`
 
-用途：获取系统内置模型列表。当前演示系统通常只有一个固定研究区模型。
+用途：获取系统内置研究区模型列表。
 
 请求：无参数、无请求体。
 

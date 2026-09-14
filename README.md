@@ -52,6 +52,8 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 研究区入口位于 `/api/models`，版本操作位于
 `/api/model-versions/{version_id}`。`POST /api/models` 不存在；用户调参时会基于当前版本生成新的派生版本，原始 V1 不会被覆盖。每次成功运行会生成 `rate_<研究区>_without_sub.json`，可通过 `/api/runs/{run_id}/lisflood-input` 获取；同时以 `.rpt` 的 `Runoff Quantity Continuity → Final Storage` 为总雨量、以 INP 模拟时长为历时生成 `chi_<研究区>.txt`，可通过 `/api/runs/{run_id}/lisflood-virtual-rainfall` 获取。两份数据共同构成方案三输入，点源 JSON 不含汇水区滞蓄，虚拟降雨代表该部分水量。
 
+LISFLOOD 对接方可先调用 `GET /api/study-areas/latest-model-versions` 获取 LC、JJ 的当前 `version_id`，再分别调用 `/api/model-versions/{version_id}/latest-result/lisflood-input` 与 `/api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall` 下载点源输入和虚拟降雨。
+
 ## 前端开发
 
 在 `ReactProject` 下执行：

@@ -13,6 +13,7 @@ from schemas.model import (
     ModelVersionRead,
     SectionDetailResponse,
     SectionSummary,
+    StudyAreaLatestVersion,
     VersionLayersResponse,
     VersionSectionsResponse,
 )
@@ -45,6 +46,23 @@ def translate_service_error(exc: Exception) -> HTTPException:
 @router.get("/models", response_model=list[ModelListItem])
 def list_models(session: Session = Depends(get_db)) -> list[dict]:
     return ModelService().list_models(session)
+
+
+@router.get(
+    "/study-areas/latest-model-versions",
+    response_model=list[StudyAreaLatestVersion],
+)
+def list_latest_study_area_versions(
+    session: Session = Depends(get_db),
+) -> list[StudyAreaLatestVersion]:
+    """Return the latest version ID for each built-in study area (LC and JJ)."""
+    try:
+        return [
+            StudyAreaLatestVersion.model_validate(item)
+            for item in ModelService().list_latest_study_area_versions(session)
+        ]
+    except Exception as exc:
+        raise translate_service_error(exc) from exc
 
 
 @router.get("/models/{model_id}", response_model=ModelRead)

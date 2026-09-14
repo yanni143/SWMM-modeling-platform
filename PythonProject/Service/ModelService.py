@@ -135,6 +135,47 @@ class ModelService:
             for model, count, latest in rows
         ]
 
+    def list_latest_study_area_versions(self, session: Session) -> list[dict]:
+        """Return the highest-numbered version for each active built-in study area.
+
+        The seed order is the public order of this integration endpoint, so callers
+        receive LC and JJ consistently even when database row order changes.
+        """
+        latest_versions = (
+            select(
+                ModelVersion.model_id.label("model_id"),
+                func.max(ModelVersion.version).label("version"),
+            )
+            .where(ModelVersion.model_id.in_(self.study_area_model_ids))
+            .group_by(ModelVersion.model_id)
+            .subquery()
+        )
+        rows = session.execute(
+            select(SwmmModel, ModelVersion)
+            .join(latest_versions, latest_versions.c.model_id == SwmmModel.id)
+            .join(
+                ModelVersion,
+                (ModelVersion.model_id == latest_versions.c.model_id)
+                & (ModelVersion.version == latest_versions.c.version),
+            )
+            .where(
+                SwmmModel.status == "active",
+                SwmmModel.id.in_(self.study_area_model_ids),
+            )
+        ).all()
+        version_by_model_id = {model.id: version for model, version in rows}
+
+        return [
+            {
+                "study_area": seed.name,
+                "model_id": seed.model_id,
+                "version_id": version_by_model_id[seed.model_id].id,
+                "version": version_by_model_id[seed.model_id].version,
+            }
+            for seed in STUDY_AREA_SEEDS
+            if seed.model_id in version_by_model_id
+        ]
+
     def get_model(self, session: Session, model_id: uuid.UUID) -> SwmmModel:
         if model_id not in self.study_area_model_ids:
             raise ModelNotFoundError("工程不存在")
