@@ -1,0 +1,74 @@
+.layer-control {
+  overflow: hidden;
+  color: #102a37;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  background: rgba(243, 246, 243, 0.94);
+  box-shadow: 0 14px 40px rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  font-family: Bahnschrift, 'Segoe UI', sans-serif;
+}
+
+.layer-top {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 13px 15px;
+  text-align: left;
+  color: white;
+  border: 0;
+  background: #102a37;
+  cursor: pointer;
+}
+
+.layer-top span { display: grid; gap: 2px; font-size: 16px; font-weight: 650; }
+.layer-top small { color: #68c4ce; font: 12px/1 Consolas, monospace; letter-spacing: 0.14em; }
+.layer-top b { min-width: 18px; color: #68c4ce; font: 600 14px Consolas, monospace; text-align: center; }
+.layer-top i { font-size: 16px; font-style: normal; font-weight: 300; }
+
+.layer-list { padding: 7px 0; }
+.layer-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 16px 14px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(16, 42, 55, 0.09);
+  cursor: default;
+}
+.layer-item:last-child { border-bottom: 0; }
+.layer-item:hover { background: rgba(35, 116, 140, 0.08); }
+.layer-item.dragging { opacity: 0.42; }
+.layer-item.drop-before { box-shadow: inset 0 2px 0 #23748c; }
+.layer-item.drop-after { box-shadow: inset 0 -2px 0 #23748c; }
+.layer-item input { accent-color: #23748c; }
+.layer-name { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.layer-item small { color: #323536; font: 12px Consolas, monospace; }
+
+.drag-handle {
+  color: #7b898d;
+  font-size: 17px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+.drag-handle:hover,
+.drag-handle:focus-visible { color: #23748c; outline: none; }
+.drag-handle:active { cursor: grabbing; }
+
+.layer-swatch { display: block; width: 11px; height: 11px; box-sizing: border-box; }
+.layer-swatch[data-geometry='fill'] { border: 1px solid #23748c; background: rgba(104, 196, 206, 0.45); }
+.layer-swatch[data-geometry='line'] { height: 2px; background: #23748c; }
+.layer-swatch[data-geometry='circle'] { border-radius: 50%; background: #23748c; }
+
+.no-layers { padding: 28px 18px 24px; text-align: center; }
+.no-layers > span { display: block; margin-bottom: 8px; color: #68aeb9; font-size: 30px; }
+.no-layers strong { display: block; font-size: 12px; font-weight: 650; }
+.no-layers p { margin: 7px 0 0; color: #718086; font-size: 11px; line-height: 1.55; }
+
+@media (max-width: 760px) {
+  .layer-control { max-width: calc(100vw - 32px); }
+}
