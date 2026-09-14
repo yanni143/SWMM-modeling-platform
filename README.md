@@ -4,7 +4,7 @@
 
 ## 目录
 
-- `MapboxProject/`：Vue 3、Vite、Mapbox GL 前端。
+- `ReactProject/`：React、Vite、Mapbox GL 前端。
 - `PythonProject/`：FastAPI、PySWMM、PostgreSQL、MinIO 后端。
 
 ## 后端开发
@@ -54,7 +54,7 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 
 ## 前端开发
 
-在 `MapboxProject` 下执行：
+在 `ReactProject` 下执行：
 
 ```powershell
 npm install
@@ -67,7 +67,7 @@ npm run dev
 
 仓库提供了一套适用于 Ubuntu 24.04 的 Docker Compose 部署配置：
 
-- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Nginx/Vue。
+- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Nginx/React。
 - `.env.production.example`：生产环境变量模板。
 - `deploy/server-bootstrap.sh`：服务器初始化和 Docker 权限配置。
 - `deploy/generate-env.sh`：生成随机数据库与 MinIO 密码。
