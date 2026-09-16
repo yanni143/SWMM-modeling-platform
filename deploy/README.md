@@ -217,6 +217,8 @@ bash deploy/deploy.sh update
 
 更新会保留 SWMM 命名卷，不影响服务器其他项目。`VITE_*` 变量会在前端构建时写入，因此修改 Mapbox Token 后也要运行 `update`。
 
+后端镜像会先依据 `PythonProject/requirements.txt` 安装依赖、再复制业务源码。因此仅修改 Python 源码时会复用已有依赖镜像层；只有修改 `requirements.txt` 时才会重新安装后端依赖。新增或调整生产依赖时，须同时更新 `PythonProject/pyproject.toml` 和 `PythonProject/requirements.txt`。
+
 ## 10. 备份
 
 ```bash

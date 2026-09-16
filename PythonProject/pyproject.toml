@@ -20,6 +20,9 @@ dependencies = [
   "uvicorn[standard]>=0.30,<1",
 ]
 
+# Docker 构建使用 requirements.txt 建立可复用的依赖缓存层；修改 production
+# dependencies 时须同步更新该文件。
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8,<9",
