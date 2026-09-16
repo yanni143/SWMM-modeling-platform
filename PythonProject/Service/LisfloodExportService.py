@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from study_areas import virtual_rainfall_scale
 from swmm_core.lisflood_rate import build_without_sub, write_output
 from swmm_core.rpt_coupling import (
     build_without_sub_source_data,
@@ -26,13 +27,20 @@ class LisfloodExportService:
         return output
 
     def write_virtual_rainfall(
-        self, inp_path: str | Path, rpt_path: str | Path, output_dir: str | Path, case_name: str
+        self,
+        inp_path: str | Path,
+        rpt_path: str | Path,
+        output_dir: str | Path,
+        case_name: str,
+        *,
+        study_area: str,
     ) -> Path | None:
         """Create scheme-three virtual rainfall from RPT runoff final storage.
 
         A missing or non-positive final-storage depth means no virtual rainfall is
-        available for this run.  The point-source artifact remains valid and is
-        deliberately not affected.
+        available for this run. The RPT depth is converted from the SWMM
+        subcatchment area to the configured LISFLOOD two-dimensional domain;
+        the point-source artifact remains deliberately unaffected.
         """
         _, final_storage_mm = read_runoff_final_storage(rpt_path)
         if final_storage_mm is None or final_storage_mm <= 0:
@@ -42,5 +50,8 @@ class LisfloodExportService:
         date_str = inp.options.get("START_DATE", "07/15/2025")
         output = Path(output_dir) / f"chi_{case_name}.txt"
         return write_chicago_file(
-            inp.sim_hours, final_storage_mm, output, date_str=date_str
+            inp.sim_hours,
+            final_storage_mm * virtual_rainfall_scale(study_area),
+            output,
+            date_str=date_str,
         )

@@ -974,7 +974,7 @@ GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/times
 方案三将 SWMM 结果拆分为两份**必须配套使用**的数据：
 
 1. 点源输入只包含节点溢流和出水口排放，不包含汇水区地表滞蓄；
-2. 虚拟降雨将 `.rpt` 中 `Runoff Quantity Continuity → Final Storage` 的面雨深等效为芝加哥雨型，代表被从点源中剥离的汇水区地表滞蓄。
+2. 虚拟降雨将 `.rpt` 中 `Runoff Quantity Continuity → Final Storage` 的面雨深，按对应研究区的“SWMM 汇水面积 / LISFLOOD 二维域面积”缩放后等效为芝加哥雨型，代表被从点源中剥离的汇水区地表滞蓄。
 
 不要将虚拟降雨与含汇水区滞蓄的点源流量表一起使用，否则会重复计算这部分水量。当前 API 不生成 `rate_*_with_sub.json`。
 
@@ -1041,7 +1041,7 @@ TS1H29_CHI       07/15/2025 01:00:00  0.0000
 
 规则：
 
-- 总雨量：RPT 的 `Final Storage` 的 `mm` 列；
+- 总雨量：RPT 的 `Final Storage` 的 `mm` 列乘研究区面积系数。LC 为 `118,270,207.3 / 150,174,375 = 0.7875525189`，JJ 为 `34,281,610.5 / 63,401,875 = 0.5407034177`；
 - 降雨历时：INP `[OPTIONS]` 的模拟起止时间之差；
 - 日期：INP 的 `START_DATE`；
 - 雨强单位：`mm/h`；步长为 5 分钟，峰值比例 `r=0.4`；

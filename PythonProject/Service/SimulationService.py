@@ -139,6 +139,7 @@ class SimulationService:
                     rpt_path,
                     workdir / "lisflood",
                     model.dataset_id or model.name,
+                    study_area=model.name,
                 )
                 if virtual_rainfall_path is not None:
                     self._record_artifact(
