@@ -4,7 +4,7 @@
 
 ## 目录
 
-- `MapboxProject/`：Vue 3、Vite、Mapbox GL 前端。
+- `ReactProject/`：React、Vite、Mapbox GL 前端。
 - `PythonProject/`：FastAPI、PySWMM、PostgreSQL、MinIO 后端。
 
 ## 后端开发
@@ -24,19 +24,20 @@
 - MinIO 默认私有 bucket：`swmm-artifacts`。
 - 工程版本：`models/{model_id}/versions/{version_id}/model.inp`（对象路径暂保持兼容）。
 - 运行输入：`runs/{run_id}/input/model.inp`。
-- 运行产物：`runs/{run_id}/{input|raw|visual}/{filename}`。
+- 运行产物：`runs/{run_id}/{input|raw|visual|lisflood}/{filename}`。
 
 SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP、OUT、RPT、日志和可视化文件必须进入 MinIO。
 
-## 固定研究区
+## 预置研究区
 
-系统不向用户提供 INP 上传能力，所有操作都从后端内置的
-`PythonProject/resources/fixed-study-area.inp` 开始。应用启动时会校验该文件，并幂等地建立固定工程和基线 V1，然后把基线归档到 MinIO。浏览器只会读取这一固定工程，数据库中可能残留的其他工程不会被接口返回或运行。
+系统不向用户提供 INP 上传能力。应用启动时会从后端资源目录幂等地注册两个研究区及其基线 V1：
 
-部署真实研究区时，应在发布前替换这个资源文件，并保持 `FIXED_MODEL_ID` 与
-`FIXED_VERSION_ID` 在同一套持久化环境中不变。若需要发布新的基础模型，应作为一次明确的数据升级处理，而不是让用户上传。
+- `PythonProject/resources/study_areas/lc/model.inp`（LC）；
+- `PythonProject/resources/study_areas/jj/model.inp`（JJ）。
 
-选择工程版本后可调用 `POST /api/model-versions/{version_id}/runs`。后端从 MinIO 下载 INP，在临时目录运行 PySWMM，解析 OUT，并将输入、OUT、RPT 和结果 GeoJSON 全部写回 MinIO。临时目录会在请求结束后删除。
+用户可在浏览器中选择研究区，并基于任一版本生成调参后的新版本。
+
+选择工程版本后可调用 `POST /api/model-versions/{version_id}/runs`。后端从 MinIO 下载 INP，在临时目录运行 PySWMM 一次，解析 OUT/RPT，并将输入、OUT、RPT、结果 GeoJSON、LISFLOOD 点源输入 JSON 和虚拟降雨 TXT 全部写回 MinIO。临时目录会在请求结束后删除。
 
 每次运行都会生成独立的数据库记录和 `runs/{run_id}` MinIO 对象，不覆盖物理历史。用户侧按版本查看结果：`GET /api/model-results` 对每个版本只返回最新一次成功运行，地图和弹窗分别通过 `/api/model-versions/{version_id}/latest-result/layers` 与 `/latest-result/timeseries` 查询同一份有效结果。失败运行不会替换该版本上一次成功结果。
 
@@ -48,12 +49,14 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 
 前端通过地图或对象列表选择要素，后端再次执行白名单和范围校验。保存时不会覆盖原始 INP，而是生成带父版本关系的新版本，并把逐项旧值/新值写入 `model_parameter_changes`。新版本可以直接运行并加载结果图层。
 
-只读的固定工程入口位于 `/api/models`，版本操作位于
-`/api/model-versions/{version_id}`。`POST /api/models` 不存在；用户调参时会基于当前版本生成新的派生版本，原始 V1 不会被覆盖。
+研究区入口位于 `/api/models`，版本操作位于
+`/api/model-versions/{version_id}`。`POST /api/models` 不存在；用户调参时会基于当前版本生成新的派生版本，原始 V1 不会被覆盖。每次成功运行会生成 `rate_<研究区>_without_sub.json`，可通过 `/api/runs/{run_id}/lisflood-input` 获取；同时将 `.rpt` 的 `Runoff Quantity Continuity → Final Storage` 雨深按“SWMM 汇水面积 / 对应 LISFLOOD 二维域面积”缩放后、以 INP 模拟时长为历时生成 `chi_<研究区>.txt`，可通过 `/api/runs/{run_id}/lisflood-virtual-rainfall` 获取。两份数据共同构成方案三输入，点源 JSON 不含汇水区滞蓄，虚拟降雨代表该部分水量。
+
+LISFLOOD 对接方可先调用 `GET /api/study-areas/latest-model-versions` 获取 LC、JJ 的当前 `version_id`，再分别调用 `/api/model-versions/{version_id}/latest-result/lisflood-input` 与 `/api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall` 下载点源输入和虚拟降雨。
 
 ## 前端开发
 
-在 `MapboxProject` 下执行：
+在 `ReactProject` 下执行：
 
 ```powershell
 npm install
@@ -66,7 +69,7 @@ npm run dev
 
 仓库提供了一套适用于 Ubuntu 24.04 的 Docker Compose 部署配置：
 
-- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Nginx/Vue。
+- `compose.prod.yaml`：PostgreSQL、MinIO、FastAPI 和 Nginx/React。
 - `.env.production.example`：生产环境变量模板。
 - `deploy/server-bootstrap.sh`：服务器初始化和 Docker 权限配置。
 - `deploy/generate-env.sh`：生成随机数据库与 MinIO 密码。

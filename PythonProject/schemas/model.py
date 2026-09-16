@@ -35,6 +35,15 @@ class ModelListItem(ModelRead):
     latest_version: Optional[int]
 
 
+class StudyAreaLatestVersion(BaseModel):
+    """The current highest-numbered version for one built-in study area."""
+
+    study_area: str
+    model_id: UUID
+    version_id: UUID
+    version: int
+
+
 class SectionSummary(BaseModel):
     name: str
     record_count: int

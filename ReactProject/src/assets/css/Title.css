@@ -1,0 +1,23 @@
+.title-container {
+  position: fixed;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 56px;
+  padding: 8px 20px;
+  text-align: left;
+  background: #102a37;
+  box-shadow: 0 1px 0 rgba(104, 196, 206, .45);
+  font-family: Bahnschrift, 'Segoe UI', sans-serif;
+}
+.title-container h1 { margin: 0; color: #fff; font-size: 18px; font-weight: 600; letter-spacing: .03em; }
+.brand-mark { display: flex; gap: 3px; align-items: end; height: 29px; }
+.brand-mark span { width: 4px; background: #68c4ce; }
+.brand-mark span:nth-child(1) { height: 11px; }
+.brand-mark span:nth-child(2) { height: 27px; }
+.brand-mark span:nth-child(3) { height: 18px; }

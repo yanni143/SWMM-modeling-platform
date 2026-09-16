@@ -9,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from config import get_settings
-from models.domain import ModelVersion, RunArtifact, SimulationRun
+from models.domain import ModelVersion, RunArtifact, SimulationRun, SwmmModel
+from Service.LisfloodExportService import LisfloodExportService
 from Service.ModelService import ModelNotFoundError, ModelService
 from Service.SWMMService import SwmmService
 from storage.artifact_storage import ArtifactStorageService, StoredObject
@@ -85,7 +86,9 @@ class SimulationService:
                 session.commit()
 
                 result = SwmmService.run_model(str(inp_path))
-                if not result.get("success") or not result.get("out_exists"):
+                if not (
+                    result.get("success") and result.get("out_exists") and result.get("rpt_exists")
+                ):
                     raise SimulationRunError(result.get("message", "SWMM 未生成 OUT 文件"))
 
                 out_path = Path(result["out_file"])
@@ -116,6 +119,40 @@ class SimulationService:
                         self.storage.upload_run_artifact(path, run.id, "visual"),
                     )
 
+                model = session.get(SwmmModel, version.model_id)
+                if not model:
+                    raise SimulationRunError("运行所属研究区不存在")
+                lisflood_path = LisfloodExportService().write_without_sub(
+                    inp_path,
+                    rpt_path,
+                    workdir / "lisflood",
+                    model.dataset_id or model.name,
+                )
+                self._record_artifact(
+                    session,
+                    run,
+                    "lisflood",
+                    self.storage.upload_run_artifact(lisflood_path, run.id, "lisflood"),
+                )
+                virtual_rainfall_path = LisfloodExportService().write_virtual_rainfall(
+                    inp_path,
+                    rpt_path,
+                    workdir / "lisflood",
+                    model.dataset_id or model.name,
+                    study_area=model.name,
+                )
+                if virtual_rainfall_path is not None:
+                    self._record_artifact(
+                        session,
+                        run,
+                        "lisflood_virtual_rainfall",
+                        self.storage.upload_run_artifact(
+                            virtual_rainfall_path, run.id, "lisflood"
+                        ),
+                    )
+                run.progress = 90
+                session.commit()
+
             run.status = "success"
             run.progress = 100
             run.finished_at = datetime.now(timezone.utc)
@@ -136,12 +173,12 @@ class SimulationService:
 
     def list_layer_artifacts(self, session: Session, run_id: uuid.UUID) -> list[dict]:
         run = session.get(SimulationRun, run_id)
-        if not run or run.model_id != self.settings.fixed_model_id:
+        if not run:
             raise SimulationRunError("运行记录不存在")
         return self._load_layer_artifacts(session, run)
 
     def list_latest_successful_results(
-        self, session: Session
+        self, session: Session, model_id: uuid.UUID | None = None
     ) -> list[tuple[SimulationRun, ModelVersion]]:
         rank = (
             func.row_number()
@@ -155,14 +192,10 @@ class SimulationService:
             )
             .label("result_rank")
         )
-        ranked = (
-            select(SimulationRun.id.label("run_id"), rank)
-            .where(
-                SimulationRun.model_id == self.settings.fixed_model_id,
-                SimulationRun.status == "success",
-            )
-            .subquery()
-        )
+        conditions = [SimulationRun.status == "success"]
+        if model_id is not None:
+            conditions.append(SimulationRun.model_id == model_id)
+        ranked = select(SimulationRun.id.label("run_id"), rank).where(*conditions).subquery()
         return list(
             session.execute(
                 select(SimulationRun, ModelVersion)
@@ -202,6 +235,51 @@ class SimulationService:
     ) -> tuple[SimulationRun, ModelVersion, list[dict]]:
         run, version = self.get_latest_successful_result(session, version_id)
         return run, version, self._load_layer_artifacts(session, run)
+
+    def get_lisflood_artifact(self, session: Session, run_id: uuid.UUID) -> RunArtifact:
+        run = session.get(SimulationRun, run_id)
+        if not run:
+            raise SimulationRunError("运行记录不存在")
+        artifact = session.scalar(
+            select(RunArtifact)
+            .where(RunArtifact.run_id == run.id, RunArtifact.artifact_type == "lisflood")
+            .order_by(RunArtifact.created_at.desc())
+            .limit(1)
+        )
+        if not artifact:
+            raise SimulationRunError("该运行尚未生成 LISFLOOD 点源输入")
+        return artifact
+
+    def get_latest_lisflood_artifact(
+        self, session: Session, version_id: uuid.UUID
+    ) -> tuple[SimulationRun, RunArtifact]:
+        run, _ = self.get_latest_successful_result(session, version_id)
+        return run, self.get_lisflood_artifact(session, run.id)
+
+    def get_lisflood_virtual_rainfall_artifact(
+        self, session: Session, run_id: uuid.UUID
+    ) -> RunArtifact:
+        run = session.get(SimulationRun, run_id)
+        if not run:
+            raise SimulationRunError("运行记录不存在")
+        artifact = session.scalar(
+            select(RunArtifact)
+            .where(
+                RunArtifact.run_id == run.id,
+                RunArtifact.artifact_type == "lisflood_virtual_rainfall",
+            )
+            .order_by(RunArtifact.created_at.desc())
+            .limit(1)
+        )
+        if not artifact:
+            raise SimulationRunError("该运行没有可用的 LISFLOOD 虚拟降雨")
+        return artifact
+
+    def get_latest_lisflood_virtual_rainfall_artifact(
+        self, session: Session, version_id: uuid.UUID
+    ) -> tuple[SimulationRun, RunArtifact]:
+        run, _ = self.get_latest_successful_result(session, version_id)
+        return run, self.get_lisflood_virtual_rainfall_artifact(session, run.id)
 
     def get_latest_version_timeseries(
         self,

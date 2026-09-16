@@ -1,0 +1,9 @@
+.sidebar-panel {
+  position: absolute;
+  z-index: 3;
+  top: 72px;
+  left: 16px;
+  display: grid;
+  gap: 12px;
+  width: 264px;
+}

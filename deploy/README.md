@@ -8,7 +8,7 @@ SWMM 使用独立的 PostgreSQL、MinIO、Docker 网络和命名卷，不复用�
 浏览器 → 宿主机 Nginx :80/:443 → 127.0.0.1:18084
                                       ↓
                               SWMM 前端 Nginx
-                                ├─ Vue 静态文件
+                                ├─ React 静态文件
                                 └─ /api → FastAPI
                                            ├─ PostgreSQL
                                            └─ MinIO
@@ -110,7 +110,7 @@ bash deploy/deploy.sh deploy
 1. 检查环境文件和占位值。
 2. 校验 Compose 配置。
 3. 拉取独立 PostgreSQL、MinIO 镜像。
-4. 构建 Nginx/Vue 前端和 FastAPI/PySWMM 后端。
+4. 构建 Nginx/React 前端和 FastAPI/PySWMM 后端。
 5. 启动独立容器、网络和数据卷。
 6. 自动执行 `alembic upgrade head`。
 7. 初始化固定研究区 V1。
@@ -216,6 +216,8 @@ bash deploy/deploy.sh update
 ```
 
 更新会保留 SWMM 命名卷，不影响服务器其他项目。`VITE_*` 变量会在前端构建时写入，因此修改 Mapbox Token 后也要运行 `update`。
+
+后端镜像会先依据 `PythonProject/requirements.txt` 安装依赖、再复制业务源码。因此仅修改 Python 源码时会复用已有依赖镜像层；只有修改 `requirements.txt` 时才会重新安装后端依赖。新增或调整生产依赖时，须同时更新 `PythonProject/pyproject.toml` 和 `PythonProject/requirements.txt`。
 
 ## 10. 备份
 

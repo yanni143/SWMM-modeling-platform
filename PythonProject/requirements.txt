@@ -1,0 +1,10 @@
+alembic>=1.14,<2
+fastapi>=0.115,<1
+minio>=7.2,<8
+psycopg2-binary>=2.9,<3
+pydantic-settings>=2.7,<3
+pyswmm>=2.0,<3
+pyproj>=3.6,<4
+python-dotenv>=1.0,<2
+sqlalchemy>=2.0,<3
+uvicorn[standard]>=0.30,<1

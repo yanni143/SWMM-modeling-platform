@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from config import get_settings
 from models.domain import ModelParameterChange, ModelVersion, SwmmModel
 from storage.artifact_storage import ArtifactStorageService
+from study_areas import STUDY_AREA_SEEDS, StudyAreaSeed
 from Tools.InpTools.InpFileHandler import INPFileHandler
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
@@ -38,42 +39,51 @@ class ModelService:
         self.settings = get_settings()
         self.storage = storage or ArtifactStorageService()
 
-    def ensure_fixed_model(
+    @property
+    def study_area_model_ids(self) -> tuple[uuid.UUID, ...]:
+        return tuple(seed.model_id for seed in STUDY_AREA_SEEDS)
+
+    def ensure_study_areas(
         self, session: Session
+    ) -> list[tuple[SwmmModel, ModelVersion, InpValidationResult]]:
+        """Create the LC and JJ immutable V1 models exactly once."""
+        return [self._ensure_seed(session, seed) for seed in STUDY_AREA_SEEDS]
+
+    def _ensure_seed(
+        self, session: Session, seed: StudyAreaSeed
     ) -> tuple[SwmmModel, ModelVersion, InpValidationResult]:
-        """Create the built-in study area and its immutable V1 exactly once."""
-        inp_path = self.settings.resolved_fixed_inp_path
+        inp_path = seed.inp_path
         if not inp_path.is_file():
-            raise FileNotFoundError(f"系统内置 INP 不存在：{inp_path}")
+            raise FileNotFoundError(f"研究区 {seed.name} 的 INP 不存在：{inp_path}")
         validation = validate_inp_file(inp_path)
 
-        model = session.get(SwmmModel, self.settings.fixed_model_id)
+        model = session.get(SwmmModel, seed.model_id)
         if model:
-            version = session.get(ModelVersion, self.settings.fixed_version_id)
+            version = session.get(ModelVersion, seed.version_id)
             if not version or version.model_id != model.id or version.version != 1:
-                raise RuntimeError("固定研究区存在，但基线 V1 记录缺失或不一致")
+                raise RuntimeError(f"研究区 {seed.name} 存在，但基线 V1 记录缺失或不一致")
             return model, version, validation
 
         name_conflict = session.scalar(
-            select(SwmmModel.id).where(SwmmModel.name == self.settings.fixed_model_name)
+            select(SwmmModel.id).where(SwmmModel.name == seed.name)
         )
         if name_conflict:
-            raise RuntimeError("固定研究区名称已被其他工程占用")
+            raise RuntimeError(f"研究区名称已被其他工程占用：{seed.name}")
 
         stored = self.storage.upload_model_version(
             inp_path,
-            self.settings.fixed_model_id,
-            self.settings.fixed_version_id,
+            seed.model_id,
+            seed.version_id,
         )
         model = SwmmModel(
-            id=self.settings.fixed_model_id,
-            name=self.settings.fixed_model_name,
-            description=self.settings.fixed_model_description,
-            dataset_id="fixed-study-area",
+            id=seed.model_id,
+            name=seed.name,
+            description=seed.description,
+            dataset_id=seed.dataset_id,
             status="active",
         )
         version = ModelVersion(
-            id=self.settings.fixed_version_id,
+            id=seed.version_id,
             model_id=model.id,
             version=1,
             inp_bucket=stored.bucket,
@@ -107,7 +117,7 @@ class ModelService:
         rows = session.execute(
             select(SwmmModel, version_count, latest_version)
             .outerjoin(ModelVersion, ModelVersion.model_id == SwmmModel.id)
-            .where(SwmmModel.id == self.settings.fixed_model_id)
+            .where(SwmmModel.status == "active", SwmmModel.id.in_(self.study_area_model_ids))
             .group_by(SwmmModel.id)
             .order_by(SwmmModel.created_at.desc())
         ).all()
@@ -125,11 +135,52 @@ class ModelService:
             for model, count, latest in rows
         ]
 
+    def list_latest_study_area_versions(self, session: Session) -> list[dict]:
+        """Return the highest-numbered version for each active built-in study area.
+
+        The seed order is the public order of this integration endpoint, so callers
+        receive LC and JJ consistently even when database row order changes.
+        """
+        latest_versions = (
+            select(
+                ModelVersion.model_id.label("model_id"),
+                func.max(ModelVersion.version).label("version"),
+            )
+            .where(ModelVersion.model_id.in_(self.study_area_model_ids))
+            .group_by(ModelVersion.model_id)
+            .subquery()
+        )
+        rows = session.execute(
+            select(SwmmModel, ModelVersion)
+            .join(latest_versions, latest_versions.c.model_id == SwmmModel.id)
+            .join(
+                ModelVersion,
+                (ModelVersion.model_id == latest_versions.c.model_id)
+                & (ModelVersion.version == latest_versions.c.version),
+            )
+            .where(
+                SwmmModel.status == "active",
+                SwmmModel.id.in_(self.study_area_model_ids),
+            )
+        ).all()
+        version_by_model_id = {model.id: version for model, version in rows}
+
+        return [
+            {
+                "study_area": seed.name,
+                "model_id": seed.model_id,
+                "version_id": version_by_model_id[seed.model_id].id,
+                "version": version_by_model_id[seed.model_id].version,
+            }
+            for seed in STUDY_AREA_SEEDS
+            if seed.model_id in version_by_model_id
+        ]
+
     def get_model(self, session: Session, model_id: uuid.UUID) -> SwmmModel:
-        if model_id != self.settings.fixed_model_id:
+        if model_id not in self.study_area_model_ids:
             raise ModelNotFoundError("工程不存在")
         model = session.get(SwmmModel, model_id)
-        if not model:
+        if not model or model.status != "active":
             raise ModelNotFoundError("工程不存在")
         return model
 
@@ -147,7 +198,7 @@ class ModelService:
         version = session.scalar(
             select(ModelVersion).where(
                 ModelVersion.id == version_id,
-                ModelVersion.model_id == self.settings.fixed_model_id,
+                ModelVersion.model_id.in_(self.study_area_model_ids),
             )
         )
         if not version:

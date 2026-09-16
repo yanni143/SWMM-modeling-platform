@@ -18,7 +18,7 @@ settings = get_settings()
 async def lifespan(_: FastAPI):
     session = get_session_factory()()
     try:
-        ModelService().ensure_fixed_model(session)
+        ModelService().ensure_study_areas(session)
     finally:
         session.close()
     yield
