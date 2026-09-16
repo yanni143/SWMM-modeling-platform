@@ -105,6 +105,13 @@ original 部分除保留 parse_report() 解析出的全部原始信息（流量�
 例如 data/results/rate_LC_MANUAL_23.json 与 rate_LC_MANUAL_23_with_sub.json。
 --out 给出的是**前一个**的路径，后一个由它派生（主干名后加 _with_sub）。
 
+  命令行也可以用 --only 选交付物集合（默认 all，保持上面的行为）：
+    all / overflow / overflow_chi / chi / storage，含义见 DELIVERABLE_CHOICES。
+  只写 overflow（不含蓄水）时不会复算引擎，此时 meta 里仍带 .rpt 官方的
+  Final Storage（reported_total_m3），供虚拟降雨与水量核对使用。
+  ⚠️ 主入口 main.py 的默认值是 overflow_chi（只出溢流+虚拟降雨），与本模块
+  命令行默认的 all 不同。
+
 Python 调用接口：
   from tools.swmm_rpt import (build_output_data, build_output_data_from_bundle,
                               prepare_report_bundle, write_output_file,
@@ -112,7 +119,9 @@ Python 调用接口：
   data = build_output_data("xxx.inp", "xxx.rpt")            # -> dict（默认 with_sub 口径）
   data = build_output_data("xxx.inp", "xxx.rpt",
                            rate_basis="without_subcatchment_storage")  # -> 不含蓄水口径
-  paths = write_output_files("xxx.inp", "xxx.rpt")          # -> (不含蓄水, 蓄水)
+  paths, storage_done = write_output_files("xxx.inp", "xxx.rpt")     # 默认只写两个 JSON
+  paths, storage_done = write_output_files("xxx.inp", "xxx.rpt",
+                                           only="overflow_chi")      # 只写不含蓄水那份
   # 想只复算一次地表蓄水量、却要两种口径的 dict：
   bundle = prepare_report_bundle("xxx.inp", "xxx.rpt")
   d1 = build_output_data_from_bundle(bundle, rate_basis="without_subcatchment_storage")
@@ -1323,6 +1332,69 @@ RATE_BASIS_COMPONENTS: dict[str, list[str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# 交付物集合（deliverable）：决定一次运行写出哪些文件
+#   方案.md 的四条路线都落在 data/results 的这三个文件上：
+#     ① 纯降雨              -> chi_<主干名>.txt
+#     ② 溢流                -> rate_<主干名>.json
+#     ③ 溢流+虚拟降雨        -> ① + ②（默认）
+#     ④ 留在汇水区的水加到溢流上 -> rate_<主干名>_with_sub.json
+#   默认只出③；要别的东西用 --only 指定，或 --only all 一次出全（= 旧行为）。
+# ---------------------------------------------------------------------------
+DELIVERABLE_OVERFLOW = "overflow"
+DELIVERABLE_OVERFLOW_CHI = "overflow_chi"
+DELIVERABLE_CHI = "chi"
+DELIVERABLE_STORAGE = "storage"
+DELIVERABLE_ALL = "all"
+DELIVERABLE_CHOICES: tuple[str, ...] = (
+    DELIVERABLE_ALL,
+    DELIVERABLE_OVERFLOW_CHI,
+    DELIVERABLE_OVERFLOW,
+    DELIVERABLE_CHI,
+    DELIVERABLE_STORAGE,
+)
+# 默认：只生成「溢流 + 虚拟降雨」，且**不复算**汇水区地表蓄水量（快，且够用）。
+DELIVERABLE_DEFAULT = DELIVERABLE_OVERFLOW_CHI
+
+# 每个交付物集合要不要写哪份文件：
+#   rate        -> rate_<主干名>.json（不含蓄水口径）
+#   with_sub    -> rate_<主干名>_with_sub.json（含蓄水口径，需要复算蓄水量）
+#   chi         -> chi_<主干名>.txt（虚拟降雨雨型）
+_DELIVERABLE_FILES: dict[str, tuple[bool, bool, bool]] = {
+    DELIVERABLE_ALL: (True, True, True),
+    DELIVERABLE_OVERFLOW: (True, False, False),
+    DELIVERABLE_OVERFLOW_CHI: (True, False, True),
+    DELIVERABLE_CHI: (False, False, True),
+    DELIVERABLE_STORAGE: (False, True, False),
+}
+
+
+def check_deliverable(deliverable: str) -> str:
+    """校验交付物集合取值，返回规范化后的名称。"""
+    if deliverable not in _DELIVERABLE_FILES:
+        raise ValueError(
+            f"未知的交付物集合: {deliverable!r}，可选：{list(DELIVERABLE_CHOICES)}")
+    return deliverable
+
+
+def write_rate(deliverable: str) -> bool:
+    """该交付物集合是否需要写「不含蓄水」的 rate_<主干名>.json。"""
+    return _DELIVERABLE_FILES[check_deliverable(deliverable)][0]
+
+
+def write_with_sub(deliverable: str) -> bool:
+    """该交付物集合是否需要写「含蓄水」的 rate_<主干名>_with_sub.json。
+
+    只有它为 True 时才需要复算一次 SWMM（质量平衡反推蓄水量）。
+    """
+    return _DELIVERABLE_FILES[check_deliverable(deliverable)][1]
+
+
+def write_chi(deliverable: str) -> bool:
+    """该交付物集合是否需要写虚拟降雨雨型 chi_<主干名>.txt。"""
+    return _DELIVERABLE_FILES[check_deliverable(deliverable)][2]
+
+
 def check_rate_basis(rate_basis: str) -> str:
     """校验 rate 口径取值，返回规范化后的名称（兼容旧别名）。"""
     normalized = RATE_BASIS_ALIASES.get(rate_basis, rate_basis)
@@ -1413,6 +1485,20 @@ def build_outlet_aggregates(
             "warnings": list(outlet_warnings) + list(result.warnings),
         })
     else:
+        # 不算蓄水量时（例如 --only overflow_chi）也要能从 .rpt 拿到官方的
+        # Final Storage：它是虚拟降雨的雨量，也是「不含蓄水 + 蓄水 = 含蓄水」
+        # 这句核对的依据。这里只读报告文本，不复算引擎。
+        ha_m, mm = _reported_runoff_final_storage(
+            _read_text_file(Path(rpt_path).expanduser().resolve()))
+        if mm is not None:
+            total_area_m2 = sum(s.area_ha * _M3_PER_HECTARE_M for s in subcatchments)
+            storage_meta.update({
+                "reported_total_m3": mm / 1000.0 * total_area_m2,
+                "total_area_m2": total_area_m2,
+                "reported_final_storage_ha_m": ha_m,
+                "reported_final_storage_mm": mm,
+                "reported_source": "rpt_runoff_quantity_continuity",
+            })
         storage_meta["warnings"].append(
             "surface_storage='off'：rate 中未包含汇水区地表蓄水量，"
             "总水量只含节点溢流与排放口出流，会偏低。")
@@ -1662,18 +1748,29 @@ def _basis_meta(
     })
     if basis == RATE_BASIS_WITHOUT_SUB:
         meta["rate_basis_excluded_components"] = ["surface_storage_m3"]
-        # 两个口径的水量核对：本口径 + 汇水区地表蓄水 = with_sub 口径（应严格相等）。
+        # 两个口径的水量核对：本口径 + 汇水区地表蓄水 = with_sub 口径。
         storage_total = sum(a.surface_storage_m3 for a in aggregates)
         with_sub_total = sum(a.total_volume_m3 for a in aggregates)
-        meta["rate_basis_water_balance_check"] = {
+        check: dict[str, object] = {
             "without_sub_m3": rate_volume,
             "surface_storage_m3": storage_total,
             "sum_m3": rate_volume + storage_total,
             "with_sub_m3": with_sub_total,
             "difference_m3": rate_volume + storage_total - with_sub_total,
-            "note": ("主口径（点位）+ 汇水区地表蓄水（虚拟降雨）= 含蓄水口径，"
-                     "两种交付方案水量等价、不重不漏。"),
         }
+        if storage_total == 0.0:
+            # 没复算蓄水量（--only overflow / overflow_chi）时的降级口径：
+            # 蓄水量取 .rpt 官方的 Final Storage（reported_total_m3），只用于核对
+            # 与虚拟降雨，**没有**加进本文件的 rate。
+            reported_total = meta.get("reported_total_m3")
+            if reported_total:
+                check.update({
+                    "surface_storage_m3_source": "rpt_final_storage(官方总量)",
+                    "implied_with_sub_m3": rate_volume + float(reported_total),
+                    "note": ("不含蓄水口径 + .rpt 官方 Final Storage = 含蓄水口径"
+                             "（含蓄水那份需 --only storage 或 --only all 才会生成）"),
+                })
+        meta["rate_basis_water_balance_check"] = check
         nonjunction = float(meta.get("nonjunction_flood_volume_m3") or 0.0)
         if nonjunction > 1e-9:
             meta["warnings"].append(
@@ -1975,6 +2072,24 @@ def write_output_file(
     return _dump_json_file(data, output)
 
 
+def _with_sub_output_path(
+    out_path: str | Path | None,
+    inp_path: str | Path,
+) -> Path:
+    """含蓄水口径的输出路径。
+
+    - `-o` 没给时走默认：data/results/rate_<主干名>_with_sub.json
+    - `-o` 给的是「不含蓄水」那份的路径时，含蓄水那份由它派生（主干名加 _with_sub）
+    - 只写含蓄水那份（--only storage）时，`-o` 本身就是含蓄水那份的路径
+    """
+    if out_path is None:
+        return default_output_path(inp_path, RATE_BASIS_WITH_SUB)
+    path = Path(out_path).expanduser()
+    if "_with_sub" in path.stem:
+        return path.resolve()
+    return with_sub_path_for(path)
+
+
 def write_output_files(
     inp_path: str | Path,
     rpt_path: str | Path,
@@ -1983,37 +2098,68 @@ def write_output_files(
     surface_storage: str = "auto",
     scale_storage_to_reported: bool = True,
     include_real_outfalls: bool = False,
-) -> tuple[Path, Path]:
-    """解析 INP + RPT，**同时写出两个 JSON**（只复算一次地表蓄水量）。
+    only: str = DELIVERABLE_ALL,
+) -> tuple[list[Path], bool]:
+    """解析 INP + RPT，按 `only` 指定的交付物集合写文件。
 
-    * `rate_<主干名>.json`           —— 不含汇水区地表蓄水（节点溢流量 + 出水口排放量）
-    * `rate_<主干名>_with_sub.json`  —— 再加上 Σ关联汇水区地表蓄水量
+    交付物集合（见 DELIVERABLE_CHOICES）：
+      * "all"          -> rate_<主干名>.json + rate_<主干名>_with_sub.json
+                          （只复算一次地表蓄水量，= 旧行为）
+      * "overflow_chi" -> rate_<主干名>.json（**默认**，不含蓄水口径）
+      * "overflow"     -> rate_<主干名>.json
+      * "chi"          -> 一个 JSON 都不写（只出虚拟降雨，由调用方另写）
+      * "storage"      -> rate_<主干名>_with_sub.json
 
-    out_path 给出的是**前一个**的路径；后一个由它派生（主干名后加 _with_sub），
-    因此 -o check\\out\\rate_demo.json 会同时得到 check\\out\\rate_demo_with_sub.json。
+    只有需要含蓄水口径（"all" / "storage"）时才复算 SWMM 取蓄水量；其余情况
+    一律按 surface_storage="off" 处理，省掉那一次复算。此时 meta 里仍会带上
+    .rpt 官方的 Final Storage（reported_total_m3 等），虚拟降雨和「不含蓄水 +
+    蓄水 = 含蓄水」的核对都用得上。
+
+    out_path 给出的是「不含蓄水」那份的路径；含蓄水那份由它派生（主干名后加
+    _with_sub）。只写含蓄水那份时，out_path 直接当作它的路径。因此
+    `-o check\\out\\rate_demo.json` 在 --only all 下会同时得到
+    check\\out\\rate_demo.json 与 check\\out\\rate_demo_with_sub.json。
 
     Returns:
-        (不含蓄水口径的 json 路径, 含蓄水口径的 json 路径)
+        (实际写出的 JSON 路径列表, 本次是否真的复算了汇水区地表蓄水量)
     """
+    deliverable = check_deliverable(only)
+    need_rate = write_rate(deliverable)
+    need_with_sub = write_with_sub(deliverable)
+    if not need_rate and not need_with_sub:
+        return ([], False)
+
+    # 不需要含蓄水口径时，别去动引擎（复算一次约数十秒）。
+    # 注意：低成本的 overflow 口径本身**不缩放**，缩放系数恒为 1.0。
+    if need_with_sub:
+        storage_mode = surface_storage
+        scale_storage = scale_storage_to_reported
+        storage_computed = surface_storage != "off"
+    else:
+        storage_mode = "off"
+        scale_storage = False
+        storage_computed = False
+
     bundle = prepare_report_bundle(
         inp_path, rpt_path,
-        surface_storage=surface_storage,
-        scale_storage_to_reported=scale_storage_to_reported,
+        surface_storage=storage_mode,
+        scale_storage_to_reported=scale_storage,
         include_real_outfalls=include_real_outfalls,
     )
 
-    without_sub_path = (default_output_path(inp_path, RATE_BASIS_WITHOUT_SUB)
-                        if out_path is None
-                        else Path(out_path).expanduser().resolve())
-    with_sub_path = with_sub_path_for(without_sub_path)
-
-    _dump_json_file(
-        build_output_data_from_bundle(bundle, rate_basis=RATE_BASIS_WITHOUT_SUB),
-        without_sub_path)
-    _dump_json_file(
-        build_output_data_from_bundle(bundle, rate_basis=RATE_BASIS_WITH_SUB),
-        with_sub_path)
-    return without_sub_path, with_sub_path
+    written: list[Path] = []
+    if need_rate:
+        without_sub_path = (default_output_path(inp_path, RATE_BASIS_WITHOUT_SUB)
+                            if out_path is None
+                            else Path(out_path).expanduser().resolve())
+        written.append(_dump_json_file(
+            build_output_data_from_bundle(bundle, rate_basis=RATE_BASIS_WITHOUT_SUB),
+            without_sub_path))
+    if need_with_sub:
+        written.append(_dump_json_file(
+            build_output_data_from_bundle(bundle, rate_basis=RATE_BASIS_WITH_SUB),
+            _with_sub_output_path(out_path, inp_path)))
+    return (written, storage_computed)
 
 
 # ---------------------------------------------------------------------------
@@ -2037,11 +2183,12 @@ def _resolve_existing_file(value: str | Path, suffix: str, label: str) -> Path:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Parse a SWMM .inp and its .rpt report, then write **two** rate_*.json "
+            "Parse a SWMM .inp and its .rpt report, then write rate_*.json "
             "summaries into data/results: rate_<stem>.json（不含汇水区地表蓄水："
             "rate = (节点溢流量 + 出水口排放量) / 时长）"
             " 与 rate_<stem>_with_sub.json（再加上 Σ关联汇水区地表蓄水量）。"
             "两个文件的节点清单与坐标完全相同，只有 rate 的取值不同。"
+            "用 --only 可以只写其中一个（详见 --help）。"
         )
     )
     parser.add_argument("inp", nargs="?", help="Path to the .inp input file")
@@ -2057,6 +2204,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="不含蓄水口径那个 JSON 的路径；含蓄水口径由它派生"
              "（主干名后加 _with_sub）。默认 data/results/rate_<inp stem>.json "
              "与 rate_<inp stem>_with_sub.json",
+    )
+    parser.add_argument(
+        "--only",
+        choices=DELIVERABLE_CHOICES,
+        default=DELIVERABLE_ALL,
+        help="只写指定交付物集合（默认 all，= 上面的两个 JSON）："
+             "all=两个 JSON; overflow=只要不含蓄水那份; overflow_chi=同 overflow"
+             "（本 CLI 不生成虚拟降雨，chi_*.txt 由 main.py 生成）; chi=不写 JSON; "
+             "storage=只要含蓄水那份。只写 overflow 时不会复算引擎。",
     )
     parser.add_argument(
         "--surface-storage",
@@ -2128,17 +2284,28 @@ def print_rate_summary(json_path: Path, label: str = "") -> None:
               f"{meta.get('total_outfall_outflow_in_rate_m3'):,.3f} m3")
         balance = meta.get("rate_basis_water_balance_check") or {}
         if balance:
+            # 含含蓄水口径文件时用真实的 Σ蓄水；只出不含蓄水那份时退化为
+            # .rpt 官方的 Final Storage（implied_with_sub_m3），并在末尾说明。
+            storage_m3 = balance.get("surface_storage_m3")
+            with_sub_m3 = balance.get("with_sub_m3")
+            suffix = ""
+            if "implied_with_sub_m3" in balance:
+                storage_m3 = balance.get("implied_with_sub_m3", 0.0) - \
+                    balance.get("without_sub_m3", 0.0)
+                with_sub_m3 = balance.get("implied_with_sub_m3")
+                suffix = "，本次未生成含蓄水那份文件"
             print(f"{prefix}  （+ 汇水区地表蓄水量 "
-                  f"{balance.get('surface_storage_m3'):,.3f} m3 = 含蓄水口径 "
-                  f"{balance.get('with_sub_m3'):,.3f} m3，由虚拟降雨 chi_*.txt 代表）")
+                  f"{storage_m3:,.3f} m3 = 含蓄水口径 "
+                  f"{with_sub_m3:,.3f} m3，由虚拟降雨 chi_*.txt 代表{suffix}）")
     print(f"{prefix}时间口径               : {meta.get('rate_time_basis')}")
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI 入口：python tools/swmm_rpt.py <inp> [<rpt>] [--out <json>]
+    """CLI 入口：python tools/swmm_rpt.py <inp> [<rpt>] [--out <json>] [--only 集合]
 
-    一次写出两个 JSON：rate_<主干名>.json（不含汇水区地表蓄水）与
-    rate_<主干名>_with_sub.json（加上汇水区地表蓄水）。--out 给的是前者的路径。
+    默认（--only all）一次写出两个 JSON：rate_<主干名>.json（不含汇水区地表蓄水）
+    与 rate_<主干名>_with_sub.json（加上汇水区地表蓄水）。--out 给的是前者的路径。
+    用 --only overflow / overflow_chi / chi / storage 可以只写其中一部分。
     """
     _setup_console()
     args = parse_args(argv)
@@ -2158,18 +2325,28 @@ def main(argv: list[str] | None = None) -> int:
                     f"Cannot find result file automatically: {rpt_path}\n"
                     "Pass the .rpt path explicitly."
                 )
-        without_sub_path, with_sub_path = write_output_files(
+        written, storage_computed = write_output_files(
             inp_path, rpt_path, out_path=args.out,
             surface_storage=args.surface_storage,
             scale_storage_to_reported=not args.no_scale_storage,
             include_real_outfalls=args.include_real_outfalls,
+            only=args.only,
         )
         if not args.quiet:
             print(f"INP : {inp_path}")
             print(f"RPT : {rpt_path}")
-            print_rate_summary(without_sub_path, label="不含蓄水：溢流+出水口排放")
-            print()
-            print_rate_summary(with_sub_path, label="含蓄水：+汇水区地表蓄水")
+            print(f"交付物集合（--only）: {args.only}")
+            for path in written:
+                label = ("含蓄水：+汇水区地表蓄水" if "_with_sub" in path.stem
+                         else "不含蓄水：溢流+出水口排放")
+                print_rate_summary(path, label=label)
+                print()
+            if not written:
+                print("（该交付物集合不含 rate JSON：--only chi 只出虚拟降雨，"
+                      "请用 main.py 生成）")
+            elif not storage_computed:
+                print("（本次未复算 SWMM 引擎：不含蓄水口径未做缩放，"
+                      "scale_factor=1.0）")
     except (ValueError, FileNotFoundError, SurfaceStorageError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

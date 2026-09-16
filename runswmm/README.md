@@ -9,7 +9,9 @@
 |---|---|
 | 入口 | 仓库根目录的 `main.py` |
 | 输入 | `data\swmm\` 下的模型文件：`<模型名>.inp` |
-| 输出 | `data\results\` 下的 2 个 JSON + 1 个 TXT（详见 §3、§4） |
+| 区域（**必填**） | `--LC`（老城）或 `--JJ`（金江），二选一；不给会直接报错退出 |
+| 输出（默认） | `data\results\` 下的 1 个 JSON + 1 个 TXT + 1 个元数据 JSON（详见 §3、§4） |
+| 需要更多口径 | 加 `--only all`（两个 JSON + 虚拟降雨）或 `--only storage`（只要含蓄水那份） |
 
 ---
 
@@ -31,27 +33,71 @@ C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --help
 
 ## 2. `main.py` 怎么用
 
+### 2.0 先选区域：`--LC` / `--JJ`（**必填**）
+
+老城（LC）和金江（JJ）是**分开跑**的两个模型，虚拟降雨要按各自的**二维计算域面积**
+缩放水深，所以必须显式二选一：
+
+| 区域 | 参数 | SWMM 汇水面积 | 二维计算域面积 | 水深缩放系数 |
+|---|---|---:|---:|---:|
+| 老城 | `--LC` | 118,270,207.3 m² | 150,174,375 m² | **0.787553** |
+| 金江 | `--JJ` | 34,281,610.5 m² | 63,401,875 m² | **0.540703** |
+
+两个都不给（或同时给）会**直接报错退出**，不解析任何文件、不输出任何东西：
+
+```text
+错误：必须指定模拟区域。
+  本项目的老城（LC）与金江（JJ）是分开跑的，虚拟降雨要按各自的二维计算域
+  面积缩放水深，所以请显式二选一：
+
+      python main.py --report LC_MANUAL_23.rpt --LC     # 老城
+      python main.py --report JJ_MANUAL_7.rpt  --JJ     # 金江
+
+  （--LC 与 --JJ 互斥，不能同时给；本次没有解析任何文件、也没有写出任何文件。）
+```
+
+> 为什么水深要乘这个系数：`.rpt` 的 `Final Storage`（mm）是**一维 SWMM 汇水面积**上的
+> 水深。二维模型的降雨撒在更大的计算域上，水量要守恒就得"乘了面积再除回来"：
+>
+> ```text
+> 水量 = SWMM 汇水面积 × .rpt 水深          ← 不变量（老城 3,065,209 m³）
+> 水深 = 水量 ÷ 二维域面积                  ← 喂给 get_chi 的实际雨深
+> 系数 = SWMM 汇水面积 ÷ 二维域面积
+> ```
+>
+> 面积与系数的出处写在 `tools/config.py` 的 `CHI_DOMAINS`，
+> 计算过程也抄了一份在 `main.py` 的 `build_virtual_rainfall()` 旁边。
+
 ### 2.1 最常用：解析已有报告
 
 ```powershell
-C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.rpt
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.rpt --LC
 ```
 
 **不会重跑模型，也不会改动 `data\swmm\` 下的任何原始文件。** 只要 `data\swmm\` 里有配对的 `.inp` 和 `.rpt` 就能跑。
 
-### 2.2 其它三种用法
+### 2.2 其它用法
 
 ```powershell
 # ① 先跑一遍模型，再解析新生成的报告
 #    （如果同名 .rpt / .out 已存在会报错，不会覆盖）
-C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py LC_MANUAL_23.inp
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py LC_MANUAL_23.inp --LC
 
 # ② 覆盖已有的 .rpt / .out 后重新跑
 #    ⚠️ 会就地覆盖 data\swmm 下的原始报告文件，请确认后再用
-C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --force LC_MANUAL_23.inp
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --force LC_MANUAL_23.inp --LC
 
-# ③ 指定输出位置（含蓄水那份会自动跟着改名：rate_demo_with_sub.json）
-C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.rpt -o D:\out\rate_demo.json
+# ③ 金江同理，把 --LC 换成 --JJ
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report JJ_MANUAL_7.rpt --JJ
+
+# ④ 指定输出位置（--only all 时含蓄水那份跟着改名：rate_demo_with_sub.json）
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.rpt --LC -o D:\out\rate_demo.json
+
+# ⑤ 要含蓄水那份（会复算一次 SWMM 取蓄水量）
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.rpt --LC --only storage
+
+# ⑥ 要全部口径（= 旧行为）
+C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.rpt --LC --only all
 ```
 
 ### 2.3 全部参数
@@ -60,47 +106,86 @@ C:\Users\sshao\.conda\envs\gistoswmm5\python.exe main.py --report LC_MANUAL_23.r
 |---|---|
 | `target` | 要运行的 `.inp` 路径或文件名（不给就必须用 `--report`） |
 | `--report <x.rpt>` | **只解析**已有的报告，不重跑模型（推荐） |
+| `--LC` | **必填（二选一）**：老城，二维计算域 150,174,375 m²，水深系数 0.787553 |
+| `--JJ` | **必填（二选一）**：金江，二维计算域 63,401,875 m²，水深系数 0.540703 |
+| `--only <集合>` | 生成哪些交付物：`overflow_chi`（**默认**，点位表+虚拟降雨）、`overflow`、`chi`、`storage`、`all`（旧行为，两个 JSON + 虚拟降雨）。见 §3 |
 | `--force` | 允许覆盖已存在的 `.rpt` / `.out` |
-| `-o`, `--out <路径>` | 指定"不含汇水区蓄水"那份 JSON 的输出路径 |
+| `-o`, `--out <路径>` | 指定"不含汇水区蓄水"那份 JSON 的输出路径（`--only storage` 时它本身就是含蓄水那份的路径） |
 | `--no-chi` | 不生成虚拟降雨雨型 TXT |
 | `--surface-storage off` | 跳过汇水区地表蓄水量计算（快一些；含蓄水那份会偏低，仅供调试） |
 | `--no-scale-storage` | 不把反推的蓄水量按报告的 Final Storage 缩放 |
 | `--include-real-outfalls` | 把 `out1`/`out2`… 这类实际排放口也放进流量表（默认不放） |
 | `-q`, `--quiet` | 只打印输出文件路径 |
 
+> `--LC` 与 `--JJ` 互斥，且**不选就不跑**（退出码 2）。虚拟降雨文件名固定为
+> `chi_<主干名>.txt`（不带区域后缀；老城和金江的输入文件主干名本来就不同，
+> 所以两份不会互相覆盖）：
+> `chi_LC_MANUAL_23.txt` / `chi_JJ_MANUAL_7.txt`。
+>
+> 默认（`--only overflow_chi`）**不复算 SWMM 取汇水区地表蓄水量**，所以不需要
+> `swmm-toolkit`，也比 `--only all` 快；只有 `all` / `storage` 才复算。
+
 ### 2.4 运行完的屏幕输出
+
+默认（`--only overflow_chi`，只出"溢流 + 虚拟降雨"两份，且不复算汇水区地表蓄水量）：
 
 ```text
 INP : C:\work\runswmm\data\swmm\LC_MANUAL_23.inp
 RPT : C:\work\runswmm\data\swmm\LC_MANUAL_23.rpt
+交付物集合（--only）: overflow_chi
 [不含蓄水：溢流+出水口排放] JSON: ...\data\results\rate_LC_MANUAL_23.json
 [不含蓄水：溢流+出水口排放] rate 条目数            : 828
 [不含蓄水：溢流+出水口排放] Σ 参与 rate 的水量     : 1,806,898.000 m3 (折合 501.916 m3/s)
 [不含蓄水：溢流+出水口排放]   ├ 节点溢流量        : 1,528,724.000 m3
 [不含蓄水：溢流+出水口排放]   └ 排放口出流量      : 278,174.000 m3
-[不含蓄水：溢流+出水口排放]   （+ 汇水区地表蓄水量 3,065,208.963 m3 = 含蓄水口径 ...）
-...
-[含蓄水：+汇水区地表蓄水] JSON: ...\data\results\rate_LC_MANUAL_23_with_sub.json
-...
-CHI : ...\data\results\chi_LC_MANUAL_23.txt   # 虚拟降雨雨型：雨量 25.917 mm = ...，历时 1 h，日期 07/15/2025
+[不含蓄水：溢流+出水口排放]   （+ 汇水区地表蓄水量 3,065,208.963 m3 = 含蓄水口径 4,872,106.963 m3，
+                                由虚拟降雨 chi_*.txt 代表，本次未生成含蓄水那份文件）
+CHI : ...\data\results\chi_LC_MANUAL_23.txt   # 虚拟降雨雨型：老城：雨量 20.4110 mm = 306.525 hectare-m
+                                              #   x 汇水面积 118,270,207 m2 ÷ 二维域 150,174,375 m2
+                                              #   （系数 0.787553，.rpt 原水深 25.917 mm），历时 1 h，日期 07/15/2025
+提示：本次没有生成 rate_<主干名>_with_sub.json（含蓄水口径）；需要时加 --only all 或 --only storage。
+提示：本次按 overflow 口径取数，**没有复算** SWMM 引擎，不含蓄水口径未做缩放（scale_factor=1.0）。
 
 JSON saved: ...\data\results\rate_LC_MANUAL_23.json
-JSON saved: ...\data\results\rate_LC_MANUAL_23_with_sub.json
+CHI  saved: ...\data\results\chi_LC_MANUAL_23.txt
 ```
+
+加 `--only all` 时才会多出"[含蓄水：+汇水区地表蓄水]"那一段和
+`rate_LC_MANUAL_23_with_sub.json`（见 §3 的 `--only` 对照表）。
 
 ---
 
 ## 3. 一次运行输出什么文件
 
-全部写在 `data\results\` 下；用 `-o` 指定路径时，两个 JSON 会写到指定位置，`chi_*.txt` 仍然写在 `data\results\`：
+`--only` 决定这次写哪些交付物（默认 `overflow_chi`）：
+
+| `--only` | `rate_<模型名>.json` | `rate_<模型名>_with_sub.json` | `chi_<模型名>.txt` | 复算引擎取蓄水 |
+|---|---|---|---|---|
+| `overflow_chi`（**默认**） | ✅ | — | ✅ | 不需要 |
+| `overflow` | ✅ | — | — | 不需要 |
+| `chi` | — | — | ✅ | 不需要 |
+| `storage` | — | ✅ | — | 需要（约数十秒） |
+| `all`（旧行为） | ✅ | ✅ | ✅ | 需要 |
+
+> `chi` 的雨深按 `--LC` / `--JJ` 选的那个二维域面积缩放，但**文件名不带区域后缀**：
+> 老城和金江的输入文件主干名本来就不同，`chi_LC_MANUAL_23.txt` 与
+> `chi_JJ_MANUAL_7.txt` 不会互相覆盖。
+
+文件内容：
 
 | 文件 | 内容 | 什么时候用 |
 |---|---|---|
 | `rate_<模型名>.json` | 点位流量表：**只算离开管网的水**（节点溢流量 + 出水口排放量），不含汇水区滞蓄 | 配 `chi_<模型名>.txt` 一起送给二维模型 |
 | `rate_<模型名>_with_sub.json` | 同样的点位，但**把汇水区地表蓄水量按汇水区归属加到了对应节点上** | 想只用一张点位表就把全部水量送出去时用 |
-| `chi_<模型名>.txt` | 虚拟降雨雨型：把"留在汇水区的水"转成一场雨 | 配 `rate_<模型名>.json` 一起用 |
+| `chi_<模型名>.txt` | 虚拟降雨雨型：把"留在汇水区的水"按二维域面积缩放成雨深，转成一场雨 | 配 `rate_<模型名>.json` 一起用 |
 
-三者都是同一份结果的**不同切法，水量不重不漏**
+它们都是同一份结果的**不同切法，水量不重不漏**。`--only overflow_chi` 这条路径
+**不调用 swmm-toolkit**（只读 `.rpt` / `.inp`），所以不需要装 Python 版 SWMM 引擎，
+也省掉那一次几十秒的复算；需要含蓄水口径时（`--only all` / `storage`）才复算。
+
+用 `-o` 指定路径时，JSON 会写到指定位置，`chi_*.txt` 仍然写在
+`data\results\`；`--only all` 下含蓄水那份由 `-o` 的路径派生（主干名后加 `_with_sub`），
+而 `--only storage` 下 `-o` 直接就是含蓄水那份的路径。
 
 ---
 
@@ -108,19 +193,21 @@ JSON saved: ...\data\results\rate_LC_MANUAL_23_with_sub.json
 
 ### 4.1 命名规则
 
-`<模型名>` = 输入文件的主干名，例如 `data\swmm\LC_MANUAL_23.inp` → `rate_LC_MANUAL_23.json`、`chi_LC_MANUAL_23.txt`。
+`<模型名>` = 输入文件的主干名。`--LC` / `--JJ` 只影响 `chi` 的**雨深**，不影响文件名。
+例如 `data\swmm\LC_MANUAL_23.inp` + `--LC` → `rate_LC_MANUAL_23.json`、`chi_LC_MANUAL_23.txt`。
 
 ```text
 data\results\
 ├── rate_LC_MANUAL_23.json            ← 点位流量表（不含汇水区蓄水）
 ├── rate_LC_MANUAL_23_with_sub.json   ← 点位流量表（含蓄水）
-├── chi_LC_MANUAL_23.txt              ← 虚拟降雨雨型
+├── chi_LC_MANUAL_23.txt              ← 虚拟降雨雨型（老城，雨深已按 150,174,375 m2 缩放）
 ├── rate_JJ_MANUAL_7.json
 ├── rate_JJ_MANUAL_7_with_sub.json
-└── chi_JJ_MANUAL_7.txt
+└── chi_JJ_MANUAL_7.txt               ← 虚拟降雨雨型（金江，雨深已按 63,401,875 m2 缩放）
 ```
 
-每次运行某个模型，只会覆盖它自己那三个文件。
+每次运行某个模型，只会覆盖**本次 `--only` 涉及**的那几个文件（比如默认
+`overflow_chi` 不会动已经存在的 `rate_*_with_sub.json`）。
 
 ---
 
@@ -260,7 +347,7 @@ TS1H25_CHI	07/15/2025	01:00:00	0.0000
 | 每行 | `时序名 TAB 日期 MM/DD/YYYY TAB 时刻 HH:MM:SS TAB 强度值` |
 | 强度值 | **mm/h**，5 min 一个 |
 | 时段数 | 模拟时长 / 5 min（1 h → 12 个），最后另补一行 `0` 表示降雨结束 |
-| 总雨量 | Σ(强度 × 5 min) = 报告里 **Runoff Quantity Continuity → Final Storage 的 mm 值**（`LC_MANUAL_23`：25.917 mm，取整后命名 `TS1H25_CHI`） |
+| 总雨量 | Σ(强度 × 5 min) = **Runoff Quantity Continuity → Final Storage 的 mm 值 × 水深缩放系数**（系数 = SWMM 汇水面积 ÷ 二维域面积，见 §2.0）。老城：25.917 × 0.787553 = **20.4110 mm**（取整后命名 `TS1H20_CHI`）；金江：29.959 × 0.540703 = **16.1989 mm**（`TS1H16_CHI`） |
 | 日期 | 模型 `.inp` 里的起始日期（两小时以内跨天的情形请自行核对） |
 | 用途 | 代表"模拟结束时还留在汇水区地表、没进管网"的水量，与 `rate_<模型名>.json` 配套使用 |
 
