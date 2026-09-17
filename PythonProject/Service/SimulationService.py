@@ -2,23 +2,24 @@ import json
 import math
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from config import get_settings
-from models.domain import ModelVersion, RunArtifact, SimulationRun, SwmmModel
-from Service.LisfloodExportService import LisfloodExportService
-from Service.ModelService import ModelNotFoundError, ModelService
-from Service.SWMMService import SwmmService
-from storage.artifact_storage import ArtifactStorageService, StoredObject
-from swmm_core.result_geojson import (
+from app.lisflood_coupling import LisfloodExporter, LisfloodInput
+from app.swmm.results import (
     latest_time_step_layers,
     parse_result_layers,
     write_result_layers,
 )
+from config import get_settings
+from models.domain import ModelVersion, RunArtifact, SimulationRun, SwmmModel
+from Service.ModelService import ModelNotFoundError, ModelService
+from Service.SWMMService import SwmmService
+from storage.artifact_storage import ArtifactStorageService, StoredObject
 from Tools.InpTools.InpInspector import data_lines
 from Tools.InpTools.InpValidator import validate_inp_file
 
@@ -28,7 +29,7 @@ class SimulationRunError(RuntimeError):
 
 
 class SimulationService:
-    LAYER_DEFINITIONS = {
+    LAYER_DEFINITIONS: ClassVar[dict[str, tuple[str, str, str]]] = {
         "result-subcatchments.geojson": (
             "result-subcatchments",
             "子汇水区模拟结果",
@@ -37,7 +38,7 @@ class SimulationService:
         "result-conduits.geojson": ("result-conduits", "管线模拟结果", "line"),
         "result-nodes.geojson": ("result-nodes", "节点模拟结果", "circle"),
     }
-    FLOW_UNIT_LABELS = {
+    FLOW_UNIT_LABELS: ClassVar[dict[str, str]] = {
         "CFS": "ft³/s",
         "GPM": "gal/min",
         "MGD": "MGD",
@@ -64,7 +65,7 @@ class SimulationService:
             model_version_id=version.id,
             status="running",
             progress=5,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         session.add(run)
         session.commit()
@@ -122,32 +123,30 @@ class SimulationService:
                 model = session.get(SwmmModel, version.model_id)
                 if not model:
                     raise SimulationRunError("运行所属研究区不存在")
-                lisflood_path = LisfloodExportService().write_without_sub(
-                    inp_path,
-                    rpt_path,
-                    workdir / "lisflood",
-                    model.dataset_id or model.name,
+                lisflood_result = LisfloodExporter().export(
+                    LisfloodInput(
+                        inp_path=inp_path,
+                        rpt_path=rpt_path,
+                        study_area=model.name,
+                        case_name=model.dataset_id or model.name,
+                        output_dir=workdir / "lisflood",
+                    )
                 )
                 self._record_artifact(
                     session,
                     run,
                     "lisflood",
-                    self.storage.upload_run_artifact(lisflood_path, run.id, "lisflood"),
+                    self.storage.upload_run_artifact(
+                        lisflood_result.point_flooding_path, run.id, "lisflood"
+                    ),
                 )
-                virtual_rainfall_path = LisfloodExportService().write_virtual_rainfall(
-                    inp_path,
-                    rpt_path,
-                    workdir / "lisflood",
-                    model.dataset_id or model.name,
-                    study_area=model.name,
-                )
-                if virtual_rainfall_path is not None:
+                if lisflood_result.virtual_rainfall_path is not None:
                     self._record_artifact(
                         session,
                         run,
                         "lisflood_virtual_rainfall",
                         self.storage.upload_run_artifact(
-                            virtual_rainfall_path, run.id, "lisflood"
+                            lisflood_result.virtual_rainfall_path, run.id, "lisflood"
                         ),
                     )
                 run.progress = 90
@@ -155,7 +154,7 @@ class SimulationService:
 
             run.status = "success"
             run.progress = 100
-            run.finished_at = datetime.now(timezone.utc)
+            run.finished_at = datetime.now(UTC)
             session.commit()
             session.refresh(run)
             return run, latest_time_step_layers(layers)
@@ -165,7 +164,7 @@ class SimulationService:
             if run:
                 run.status = "failed"
                 run.error_message = str(exc)[:4000]
-                run.finished_at = datetime.now(timezone.utc)
+                run.finished_at = datetime.now(UTC)
                 session.commit()
             if isinstance(exc, SimulationRunError):
                 raise

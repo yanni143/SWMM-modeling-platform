@@ -16,6 +16,7 @@ const formatTime = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+const studyAreaName = (name: string) => ({ LC: '老城', JJ: '金江' }[name] ?? name);
 
 export default function ModelWorkspace() {
   const store = useModelStore();
@@ -38,7 +39,7 @@ export default function ModelWorkspace() {
           <p className="workspace-kicker">
             SWMM STUDY AREA
           </p>
-          <h2>{selected?.name || '模型工作台'}</h2>
+          <h2>{selected ? studyAreaName(selected.name) : '模型工作台'}</h2>
         </div>
         <div className="workspace-status">
           <span className="system-state">
@@ -68,7 +69,7 @@ export default function ModelWorkspace() {
               >
                 {store.models.map((model) => (
                   <option key={model.id} value={model.id}>
-                    {model.name}
+                    {studyAreaName(model.name)}
                   </option>
                 ))}
               </select>

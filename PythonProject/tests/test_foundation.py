@@ -4,15 +4,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import models  # noqa: F401
+from app.lisflood_coupling import LisfloodExporter, LisfloodInput
+from app.lisflood_coupling.point_flooding import build_point_flooding
+from app.lisflood_coupling.profiles import get_lisflood_profile
+from app.swmm.results import latest_time_step_layers
+from app.swmm.rpt import read_runoff_final_storage
 from Controller.controller import app
 from database.base import Base
-from Service.LisfloodExportService import LisfloodExportService
 from Service.ModelService import ModelService
 from storage.artifact_storage import ArtifactKeyBuilder, ArtifactStorageService
-from study_areas import STUDY_AREA_SEEDS, virtual_rainfall_scale
-from swmm_core.lisflood_rate import build_without_sub
-from swmm_core.result_geojson import latest_time_step_layers
-from swmm_core.rpt_coupling import build_without_sub_source_data, read_runoff_final_storage
+from study_areas import STUDY_AREA_SEEDS
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpParameterEditor import (
@@ -510,10 +511,15 @@ Rainfall01 01/01/2025 00:00:00 0
 
     def test_lisflood_without_sub_matches_lc_reference_fixture(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "coupling" / "lc"
-        source = build_without_sub_source_data(
-            fixture / "LC_MANUAL_23.inp", fixture / "LC_MANUAL_23.rpt"
+        actual = build_point_flooding(
+            LisfloodInput(
+                inp_path=fixture / "LC_MANUAL_23.inp",
+                rpt_path=fixture / "LC_MANUAL_23.rpt",
+                study_area="LC",
+                case_name="LC_MANUAL_23",
+                output_dir=fixture,
+            )
         )
-        actual, _ = build_without_sub(source)
         expected = __import__("json").loads(
             (fixture / "rate_LC_MANUAL_23_without_sub.json").read_text(encoding="utf-8")
         )["rate"]
@@ -531,13 +537,16 @@ Rainfall01 01/01/2025 00:00:00 0
                 fixture = fixture_root / study_area.lower()
                 _, final_storage_mm = read_runoff_final_storage(fixture / f"{case_name}.rpt")
                 self.assertIsNotNone(final_storage_mm)
-                output = LisfloodExportService().write_virtual_rainfall(
-                    fixture / f"{case_name}.inp",
-                    fixture / f"{case_name}.rpt",
-                    directory,
-                    case_name,
-                    study_area=study_area,
+                result = LisfloodExporter().export(
+                    LisfloodInput(
+                        inp_path=fixture / f"{case_name}.inp",
+                        rpt_path=fixture / f"{case_name}.rpt",
+                        study_area=study_area,
+                        case_name=case_name,
+                        output_dir=Path(directory),
+                    )
                 )
+                output = result.virtual_rainfall_path
                 self.assertIsNotNone(output)
                 content = output.read_text(encoding="utf-8")
 
@@ -550,6 +559,6 @@ Rainfall01 01/01/2025 00:00:00 0
             self.assertEqual(values[-1], 0.0)
             self.assertAlmostEqual(
                 sum(values[:-1]) * 5 / 60,
-                final_storage_mm * virtual_rainfall_scale(study_area),
+                final_storage_mm * get_lisflood_profile(study_area).virtual_rainfall_scale,
                 places=3,
             )

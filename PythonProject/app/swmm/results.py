@@ -1,3 +1,6 @@
+# ruff: noqa: BLE001
+"""Parse SWMM OUT files into map-ready result layers."""
+
 import json
 from pathlib import Path
 from typing import Any
@@ -5,9 +8,9 @@ from typing import Any
 from pyswmm import LinkSeries, NodeSeries, Output
 from swmm.toolkit.shared_enum import SubcatchAttribute
 
+from config import get_settings
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpValidator import validate_inp_file
-from config import get_settings
 
 
 def _geometry_index(layers: list[dict], layer_id: str) -> dict[str, dict]:
