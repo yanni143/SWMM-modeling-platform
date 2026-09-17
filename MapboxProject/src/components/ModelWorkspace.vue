@@ -3,7 +3,7 @@
     <div class="workspace-heading">
       <div>
         <p class="workspace-kicker">FIXED STUDY AREA / 01</p>
-        <h2>{{ store.selectedModel?.name || '模型工作台' }}</h2>
+        <h2>{{ studyAreaName(store.selectedModel?.name) }}</h2>
       </div>
       <div class="workspace-status">
         <span class="system-state"><i></i> INP READY</span>
@@ -82,6 +82,7 @@ import eventBus from '@/eventBus'
 import ParameterTuning from './ParameterTuning.vue'
 
 const store = useModelStore()
+const studyAreaName = (name?: string) => ({ LC: '老城', JJ: '金江' }[name || ''] || name || '模型工作台')
 
 onMounted(() => store.loadModels())
 
