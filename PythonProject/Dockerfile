@@ -25,7 +25,7 @@ COPY database ./database
 COPY models ./models
 COPY schemas ./schemas
 COPY storage ./storage
-COPY swmm_core ./swmm_core
+COPY app ./app
 COPY resources ./resources
 COPY config.py ./config.py
 COPY study_areas.py ./study_areas.py

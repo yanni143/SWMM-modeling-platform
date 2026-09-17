@@ -1,4 +1,4 @@
-from swmm_core.runner import run_pyswmm
+from app.swmm.runner import run_pyswmm
 
 
 class SwmmService:
@@ -25,7 +25,7 @@ class SwmmService:
                 "success": False,
                 "message": str(e)
             }
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return {
                 "success": False,
                 "message": f"模型运行失败: {e}"

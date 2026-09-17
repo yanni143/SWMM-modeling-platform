@@ -18,6 +18,12 @@
 
 真实 `.env`、虚拟环境、IDE 配置和构建目录禁止提交。
 
+## 后端职责边界
+
+- `PythonProject/app/swmm/`：SWMM 运行、INP/RPT/OUT 通用解析和可视化结果；不包含任何 LISFLOOD 规则。
+- `PythonProject/app/lisflood_coupling/`：以同一模型版本的 INP、运行 RPT 和 LC/JJ 配置为输入，生成点源溢流 JSON 与虚拟降雨 TXT；不运行 SWMM、不访问数据库或 MinIO。
+- `PythonProject/Service/SimulationService.py`：只编排模型运行、产物归档和对 `LisfloodExporter` 的调用。现有 LISFLOOD 下载 API 与产物名称保持不变。
+
 ## 持久化约定
 
 - PostgreSQL 数据库：`fenhuModel`。

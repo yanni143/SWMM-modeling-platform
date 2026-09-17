@@ -41,7 +41,7 @@ include = [
   "database*",
   "models*",
   "storage*",
-  "swmm_core*",
+  "app*",
 ]
 
 [tool.ruff]

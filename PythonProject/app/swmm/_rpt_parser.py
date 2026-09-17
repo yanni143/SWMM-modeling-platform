@@ -1,6 +1,7 @@
+# ruff: noqa
 from __future__ import annotations
 
-"""SWMM 报告解析与速率汇总程序。
+"""Legacy SWMM INP/RPT parser retained while its public API is split by domain.
 
 该程序接受两个输入文件：
   1. 一个 SWMM 的 .inp 输入文件（用于解析 [OPTIONS] 的模拟起止时间、[COORDINATES]
