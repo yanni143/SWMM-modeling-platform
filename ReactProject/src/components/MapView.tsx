@@ -209,6 +209,7 @@ export default function MapView() {
       removeBySource('inp');
       try {
         const incoming = await fetchProjectLayers(versionId);
+        if (useModelStore.getState().selectedVersionId !== versionId) return;
         incoming.forEach((layer) =>
           register({
             id: layer.id,
@@ -232,6 +233,7 @@ export default function MapView() {
       if (!mapRef.current?.loaded()) return;
       try {
         const result = await fetchLatestVersionResultLayers(versionId);
+        if (useModelStore.getState().activeResultVersionId !== versionId) return;
         removeBySource('simulation');
         result.layers.forEach((layer) =>
           register({
@@ -371,7 +373,11 @@ export default function MapView() {
   }, [loadInp, loadResults, resetTimeline]);
   useEffect(() => {
     if (selectedVersionId) void loadInp(selectedVersionId);
-  }, [loadInp, selectedVersionId]);
+    else {
+      popupToolRef.current?.closePopup();
+      removeBySource('inp');
+    }
+  }, [loadInp, removeBySource, selectedVersionId]);
   useEffect(() => {
     if (activeResultVersionId && !running) void loadResults(activeResultVersionId);
     if (!activeResultVersionId) {

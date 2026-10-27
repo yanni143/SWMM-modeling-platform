@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -17,6 +17,7 @@ class ModelVersionRead(BaseModel):
     change_summary: Optional[dict[str, Any]]
     created_by: Optional[str]
     created_at: datetime
+    rainfall_mode: Literal["design", "real"] = "design"
 
 
 class ModelRead(BaseModel):
@@ -30,9 +31,17 @@ class ModelRead(BaseModel):
     updated_at: datetime
 
 
+class RainfallInputRead(BaseModel):
+    mode: Literal["design", "real"]
+    label: str
+    baseline_version_id: UUID
+    filename: str
+
+
 class ModelListItem(ModelRead):
     version_count: int
     latest_version: Optional[int]
+    rainfall_inputs: list[RainfallInputRead]
 
 
 class StudyAreaLatestVersion(BaseModel):

@@ -65,7 +65,7 @@ class FoundationTests(unittest.TestCase):
     def simulation_settings():
         return SimpleNamespace(
             simulation_duration_min_seconds=60,
-            simulation_duration_max_seconds=86400,
+            simulation_duration_max_seconds=172800,
             report_step_min_seconds=10,
             simulation_require_report_step_divisible=False,
             simulation_max_output_steps=1000,
@@ -469,8 +469,8 @@ Rainfall01 01/01/2025 00:11:00 18
         options = build_rainfall_options(INPParser.parse(content), 7200)
 
         self.assertEqual(options["start_seconds"], 600)
-        self.assertEqual(options["duration_seconds"], 360)
-        self.assertAlmostEqual(options["total_rainfall_mm"], 2.5)
+        self.assertEqual(options["duration_seconds"], 120)
+        self.assertAlmostEqual(options["total_rainfall_mm"], 0.5)
         self.assertEqual(options["formula"], "existing_timeseries")
 
     def test_design_rainfall_rejects_invalid_schema_2_metadata(self) -> None:

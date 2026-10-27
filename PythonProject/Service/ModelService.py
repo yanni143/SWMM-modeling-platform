@@ -11,19 +11,24 @@ from sqlalchemy.orm import Session
 from config import get_settings
 from models.domain import ModelParameterChange, ModelVersion, SwmmModel
 from storage.artifact_storage import ArtifactStorageService
-from study_areas import STUDY_AREA_SEEDS, StudyAreaSeed
+from study_areas import (
+    JJ_REAL_INPUT_PATH,
+    JJ_REAL_VERSION_ID,
+    STUDY_AREA_SEEDS,
+    StudyAreaSeed,
+    rainfall_inputs,
+)
 from Tools.InpTools.InpFileHandler import INPFileHandler
 from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpParameterEditor import (
     apply_parameter_changes,
-    apply_simulation_options,
     build_parameter_catalog,
     build_simulation_options,
 )
-from Tools.InpTools.InpRainfallEditor import apply_rainfall_options, build_rainfall_options
 from Tools.InpTools.InpParser import INPParser
 from Tools.InpTools.InpValidator import InpValidationResult, validate_inp_file
+from Tools.InpTools.RainfallScenario import apply_rainfall_scenario, rainfall_catalog
 
 
 class ModelNotFoundError(LookupError):
@@ -46,8 +51,58 @@ class ModelService:
     def ensure_study_areas(
         self, session: Session
     ) -> list[tuple[SwmmModel, ModelVersion, InpValidationResult]]:
-        """Create the LC and JJ immutable V1 models exactly once."""
-        return [self._ensure_seed(session, seed) for seed in STUDY_AREA_SEEDS]
+        """Register study areas and both JJ input roots exactly once."""
+        seeded = [self._ensure_seed(session, seed) for seed in STUDY_AREA_SEEDS]
+        self._ensure_real_input(session)
+        return seeded
+
+    def _ensure_real_input(self, session: Session) -> ModelVersion:
+        seed = next(seed for seed in STUDY_AREA_SEEDS if seed.name == "JJ")
+        model = session.get(SwmmModel, seed.model_id, with_for_update=True)
+        if not model:
+            raise ModelNotFoundError("金江研究区不存在")
+        existing = session.get(ModelVersion, JJ_REAL_VERSION_ID)
+        if existing:
+            if existing.model_id != model.id or existing.rainfall_mode != "real":
+                raise RuntimeError("金江真实降雨输入记录不一致")
+            session.commit()
+            return existing
+        validation = validate_inp_file(JJ_REAL_INPUT_PATH)
+        latest = (
+            session.scalar(
+                select(func.max(ModelVersion.version)).where(ModelVersion.model_id == model.id)
+            )
+            or 0
+        )
+        # Store the full supplied INP unchanged, without user parameter changes.
+        stored = self.storage.upload_model_version(JJ_REAL_INPUT_PATH, model.id, JJ_REAL_VERSION_ID)
+        version = ModelVersion(
+            id=JJ_REAL_VERSION_ID,
+            model_id=model.id,
+            parent_version_id=None,
+            version=latest + 1,
+            inp_bucket=stored.bucket,
+            inp_object_key=stored.object_key,
+            checksum=stored.checksum,
+            size_bytes=stored.size_bytes,
+            change_summary={
+                "source": "system_rainfall_input",
+                "rainfall_mode": "real",
+                "rainfall_event_id": "jj_real_20260913_2d",
+                "original_filename": JJ_REAL_INPUT_PATH.name,
+                "section_count": len(validation.sections),
+            },
+            created_by="system",
+        )
+        try:
+            session.add(version)
+            session.commit()
+            session.refresh(version)
+        except Exception:
+            session.rollback()
+            self._delete_uploaded_object(stored.object_key)
+            raise
+        return version
 
     def _ensure_seed(
         self, session: Session, seed: StudyAreaSeed
@@ -64,9 +119,7 @@ class ModelService:
                 raise RuntimeError(f"研究区 {seed.name} 存在，但基线 V1 记录缺失或不一致")
             return model, version, validation
 
-        name_conflict = session.scalar(
-            select(SwmmModel.id).where(SwmmModel.name == seed.name)
-        )
+        name_conflict = session.scalar(select(SwmmModel.id).where(SwmmModel.name == seed.name))
         if name_conflict:
             raise RuntimeError(f"研究区名称已被其他工程占用：{seed.name}")
 
@@ -131,11 +184,14 @@ class ModelService:
                 "updated_at": model.updated_at,
                 "version_count": count,
                 "latest_version": latest,
+                "rainfall_inputs": rainfall_inputs(model.id),
             }
             for model, count, latest in rows
         ]
 
-    def list_latest_study_area_versions(self, session: Session) -> list[dict]:
+    def list_latest_study_area_versions(
+        self, session: Session, rainfall_mode: str = "design"
+    ) -> list[dict]:
         """Return the highest-numbered version for each active built-in study area.
 
         The seed order is the public order of this integration endpoint, so callers
@@ -147,6 +203,10 @@ class ModelService:
                 func.max(ModelVersion.version).label("version"),
             )
             .where(ModelVersion.model_id.in_(self.study_area_model_ids))
+            .where(
+                func.coalesce(ModelVersion.change_summary["rainfall_mode"].as_string(), "design")
+                == rainfall_mode
+            )
             .group_by(ModelVersion.model_id)
             .subquery()
         )
@@ -224,13 +284,16 @@ class ModelService:
         )
 
     def get_parameter_catalog(self, session: Session, version_id: uuid.UUID) -> dict:
-        _, validation = self._download_and_validate(session, version_id)
+        version, validation = self._download_and_validate(session, version_id)
+        study_area = next(
+            seed.name for seed in STUDY_AREA_SEEDS if seed.model_id == version.model_id
+        )
         simulation_options = build_simulation_options(validation.sections, self.settings)
         return {
             "groups": build_parameter_catalog(validation.sections),
             "simulation_options": simulation_options,
-            "rainfall_options": build_rainfall_options(
-                validation.sections, simulation_options["duration_seconds"]
+            "rainfall_options": rainfall_catalog(
+                validation.sections, study_area, self.settings, version.rainfall_mode
             ),
         }
 
@@ -263,11 +326,6 @@ class ModelService:
             content, _ = INPFileHandler.read_file(str(source_path))
             if not content:
                 raise ValueError("无法读取父版本 INP")
-            original_sections = INPParser.parse(content)
-            original_simulation = build_simulation_options(original_sections, self.settings)
-            original_rainfall = build_rainfall_options(
-                original_sections, original_simulation["duration_seconds"]
-            )
             adjusted_content = content
             applied = []
             if changes:
@@ -275,42 +333,32 @@ class ModelService:
                     adjusted_content, changes
                 )
                 applied.extend(parameter_changes)
-            if simulation_options:
-                parsed_sections = INPParser.parse(adjusted_content)
-                adjusted_content, option_changes = apply_simulation_options(
-                    adjusted_content,
-                    parsed_sections,
-                    simulation_options,
-                    self.settings,
-                )
-                applied.extend(option_changes)
-            parsed_sections = INPParser.parse(adjusted_content)
-            effective_simulation = build_simulation_options(parsed_sections, self.settings)
-            requested_rainfall = rainfall_options or {
-                "start_seconds": original_rainfall["start_seconds"],
-                "duration_seconds": original_rainfall["duration_seconds"],
-                "total_rainfall_mm": original_rainfall["total_rainfall_mm"],
-            }
-            if rainfall_options or (
-                original_rainfall["end_seconds"] > effective_simulation["duration_seconds"]
-            ):
-                adjusted_content, rainfall_changes = apply_rainfall_options(
-                    adjusted_content,
-                    parsed_sections,
-                    requested_rainfall,
-                    effective_simulation["duration_seconds"],
-                )
-                applied.extend(rainfall_changes)
+            study_area = next(seed.name for seed in STUDY_AREA_SEEDS if seed.model_id == model.id)
+            adjusted_content, scenario_changes = apply_rainfall_scenario(
+                adjusted_content,
+                study_area,
+                self.settings,
+                simulation_options,
+                rainfall_options,
+                rainfall_mode=parent.rainfall_mode,
+            )
+            applied.extend(scenario_changes)
             if not applied:
                 raise ValueError("提交的参数没有发生变化")
             message = INPFileHandler.write_file(str(target_path), adjusted_content)
             if message.startswith("错误"):
                 raise OSError(message)
             validate_inp_file(target_path)
+            final_rainfall = rainfall_catalog(
+                INPParser.parse(adjusted_content), study_area, self.settings, parent.rainfall_mode
+            )
 
-            latest = session.scalar(
-                select(func.max(ModelVersion.version)).where(ModelVersion.model_id == model.id)
-            ) or 0
+            latest = (
+                session.scalar(
+                    select(func.max(ModelVersion.version)).where(ModelVersion.model_id == model.id)
+                )
+                or 0
+            )
             version_id = uuid.uuid4()
             stored = self.storage.upload_model_version(target_path, model.id, version_id)
             version = ModelVersion(
@@ -326,6 +374,8 @@ class ModelService:
                     "source": "parameter_adjustment",
                     "summary": summary or f"调整 {len(applied)} 项常用参数",
                     "change_count": len(applied),
+                    "rainfall_mode": final_rainfall["mode"],
+                    "rainfall_event_id": final_rainfall["event_id"],
                 },
                 created_by=created_by,
             )

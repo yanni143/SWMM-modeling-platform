@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     swmm_input_crs: str = "EPSG:4549"
 
     simulation_duration_min_seconds: int = 60
-    simulation_duration_max_seconds: int = 86_400
+    simulation_duration_max_seconds: int = 172_800
     report_step_min_seconds: int = 10
     simulation_require_report_step_divisible: bool = False
     simulation_max_output_steps: int = 1_000

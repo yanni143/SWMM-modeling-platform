@@ -35,11 +35,11 @@ export default function ParameterTuning() {
   const [batchKey, setBatchKey] = useState('');
   const [batchOperation, setBatchOperation] = useState<'set' | 'add' | 'percent'>('set');
   const [batchAmount, setBatchAmount] = useState('');
-  const [duration, setDuration] = useState(0);
-  const [reportStep, setReportStep] = useState(0);
-  const [rainStart, setRainStart] = useState(0);
-  const [rainDuration, setRainDuration] = useState(0);
-  const [rainfall, setRainfall] = useState(0);
+  const [duration, setDuration] = useState(store.simulationOptions?.duration_seconds ?? 0);
+  const [reportStep, setReportStep] = useState(store.simulationOptions?.report_step_seconds ?? 0);
+  const [rainStart, setRainStart] = useState(store.rainfallOptions?.start_seconds ?? 0);
+  const [rainDuration, setRainDuration] = useState(store.rainfallOptions?.duration_seconds ?? 0);
+  const [rainfall, setRainfall] = useState(store.rainfallOptions?.total_rainfall_mm ?? 0);
   const group = groups.find((item) => item.id === groupId);
   const objects = group?.objects ?? [];
   const filtered = objects.filter((item) =>
@@ -55,10 +55,14 @@ export default function ParameterTuning() {
   const draftsList = Object.values(drafts);
   const options = store.simulationOptions;
   const rainOptions = store.rainfallOptions;
+  const realEvent = rainOptions?.real_event;
+  const rainLocked = rainOptions?.read_only ?? false;
+  const startDatetime = options?.start_datetime;
   const durationChanged = duration !== options?.duration_seconds;
   const stepChanged = reportStep !== options?.report_step_seconds;
   const rainChanged =
     !!rainOptions &&
+    !rainLocked &&
     (rainStart !== rainOptions.start_seconds ||
       rainDuration !== rainOptions.duration_seconds ||
       rainfall !== rainOptions.total_rainfall_mm);
@@ -102,7 +106,7 @@ export default function ParameterTuning() {
               ? '总降雨量必须是大于 0 的有效数值'
               : '';
   const error = localError || simulationError || rainError;
-  const nextVersion = Math.max(...store.versions.map((item) => item.version), 0) + 1;
+  const nextVersion = Math.max(...store.allVersions.map((item) => item.version), 0) + 1;
   useEffect(() => {
     setDuration(options?.duration_seconds ?? 0);
     setReportStep(options?.report_step_seconds ?? 0);
@@ -129,6 +133,8 @@ export default function ParameterTuning() {
   useEffect(() => {
     setDrafts({});
     setCreated(null);
+    setLocalError('');
+    setSummary('');
   }, [store.selectedVersionId]);
   useEffect(() => {
     const handler = (event: Event) => {
@@ -247,13 +253,19 @@ export default function ParameterTuning() {
         ? { duration_seconds: duration, report_step_seconds: reportStep }
         : undefined,
       rainChanged
-        ? { start_seconds: rainStart, duration_seconds: rainDuration, total_rainfall_mm: rainfall }
+        ? {
+            mode: 'design',
+            start_seconds: rainStart,
+            duration_seconds: rainDuration,
+            total_rainfall_mm: rainfall,
+          }
         : undefined,
     );
     if (result) {
       setCreated(result.version);
       setSummary('');
-      clear();
+      setDrafts({});
+      setLocalError('');
     }
   };
   const runCreated = async () => {
@@ -261,13 +273,18 @@ export default function ParameterTuning() {
     if (result) window.dispatchEvent(new CustomEvent('swmm:run-completed', { detail: result }));
   };
   const estimate = useMemo(() => {
-    if (!options || duration <= 0) return '—';
-    const date = new Date(parseDate(options.start_datetime).getTime() + duration * 1000);
+    if (!startDatetime || duration <= 0) return '—';
+    const date = new Date(parseDate(startDatetime).getTime() + duration * 1000);
     const pad = (part: number) => String(part).padStart(2, '0');
     return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
-  }, [duration, options]);
+  }, [duration, startDatetime]);
   return (
-    <section className="tuning-workspace" aria-label="参数设置">
+    <section
+      className="tuning-workspace"
+      aria-label="参数设置"
+      inert={store.loading || store.savingVersion || store.running}
+      aria-busy={store.loading}
+    >
       <div className="tuning-heading">
         <div>
           <h3>模拟参数设置</h3>
@@ -278,6 +295,13 @@ export default function ParameterTuning() {
           </span>
         )}
       </div>
+      {rainLocked && realEvent && (
+        <p id="rainfall-lock-note" className="rainfall-note" role="note">
+          实测资料：{realEvent.start_datetime.replace('T', ' ')} 至{' '}
+          {realEvent.end_datetime.replace('T', ' ')}。
+          模拟时长、降雨开始、降雨时长和总雨量由资料确定，只读；工程参数仍可修改。
+        </p>
+      )}
       {options && (
         <div className="simulation-settings">
           <div className="simulation-setting-fields">
@@ -287,6 +311,8 @@ export default function ParameterTuning() {
               </span>
               <input
                 value={duration}
+                readOnly={rainLocked}
+                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min={options.duration_min_seconds}
                 max={options.duration_max_seconds}
@@ -294,7 +320,9 @@ export default function ParameterTuning() {
                 onChange={(event) => setDuration(Number(event.target.value))}
               />
               <small>
-                {options.duration_min_seconds}～{options.duration_max_seconds} 秒
+                {rainLocked
+                  ? '固定 172800 秒（48 小时）'
+                  : `${options.duration_min_seconds}～${options.duration_max_seconds} 秒（最长 48 小时）`}
               </small>
             </label>
             <label>
@@ -309,12 +337,13 @@ export default function ParameterTuning() {
                 step="1"
                 onChange={(event) => setReportStep(Number(event.target.value))}
               />
-              <small>
-                不小于路由步长 {options.routing_step_seconds} 秒
-              </small>
+              <small>不小于路由步长 {options.routing_step_seconds} 秒</small>
             </label>
           </div>
           <div className="simulation-projection">
+            <span>模拟开始</span>
+            <strong>{startDatetime?.replace('T', ' ') ?? '—'}</strong>
+            <span />
             <span>预计结束</span>
             <strong>{estimate}</strong>
             <output>{outputSteps} 个输出点</output>
@@ -331,6 +360,8 @@ export default function ParameterTuning() {
               </span>
               <input
                 value={rainStart}
+                readOnly={rainLocked}
+                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min="0"
                 max={duration}
@@ -345,13 +376,18 @@ export default function ParameterTuning() {
               </span>
               <input
                 value={rainDuration}
+                readOnly={rainLocked}
+                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min="0"
                 max={Math.max(0, duration - rainStart)}
                 step={rainOptions.time_step_seconds}
                 onChange={(event) => setRainDuration(Number(event.target.value))}
               />
-              <small>{time(rainDuration)}</small>
+              <small>
+                {time(rainDuration)}
+                {rainLocked ? ' · 资料覆盖时长，包含无雨时段' : ''}
+              </small>
             </label>
             <label>
               <span>
@@ -359,19 +395,28 @@ export default function ParameterTuning() {
               </span>
               <input
                 value={rainfall}
+                readOnly={rainLocked}
+                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min="0"
                 step="0.1"
                 onChange={(event) => setRainfall(Number(event.target.value))}
               />
               <small>
-                当前峰值 {rainOptions.peak_rainfall_mm_h.toFixed(2)} mm/h
+                当前峰值{' '}
+                {(rainLocked && realEvent
+                  ? realEvent.peak_rainfall_mm_h
+                  : rainOptions.peak_rainfall_mm_h
+                ).toFixed(2)}{' '}
+                mm/h
               </small>
             </label>
             <div className="rainfall-derived">
               <span>降雨结束</span>
               <strong>{time(rainStart + rainDuration)}</strong>
-              <small>峰现系数 {rainOptions.peak_ratio}</small>
+              <small>
+                {rainLocked ? '5 分钟实测累计雨量' : `峰现系数 ${rainOptions.peak_ratio}`}
+              </small>
             </div>
           </div>
         </div>
@@ -425,11 +470,7 @@ export default function ParameterTuning() {
             onChange={(event) => setSearch(event.target.value)}
           />
           {mode === 'single' ? (
-            <select
-              value={target}
-              size={5}
-              onChange={(event) => setTarget(event.target.value)}
-            >
+            <select value={target} size={5} onChange={(event) => setTarget(event.target.value)}>
               {filtered.map((item) => (
                 <option key={item.target} value={item.target}>
                   {item.target}
@@ -454,9 +495,7 @@ export default function ParameterTuning() {
                 </button>
               </div>
               {filtered.map((item) => (
-                <label
-                  key={item.target}
-                >
+                <label key={item.target}>
                   <input
                     type="checkbox"
                     checked={targets.includes(item.target)}
@@ -556,9 +595,7 @@ export default function ParameterTuning() {
               </button>
             </div>
           ) : (
-            <p className="no-common-fields">
-              所选对象没有共同的可调参数，请选择同一种节点类型。
-            </p>
+            <p className="no-common-fields">所选对象没有共同的可调参数，请选择同一种节点类型。</p>
           )}
         </div>
       )}
@@ -593,7 +630,7 @@ export default function ParameterTuning() {
           )}
           {rainChanged && (
             <Change
-              label="设计降雨"
+              label="模拟降雨"
               oldValue={`${time(rainOptions!.start_seconds)}–${time(rainOptions!.start_seconds + rainOptions!.duration_seconds)} · ${rainOptions!.total_rainfall_mm} mm`}
               newValue={`${time(rainStart)}–${time(rainStart + rainDuration)} · ${rainfall} mm`}
               onRemove={() => {

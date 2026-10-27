@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -54,12 +55,13 @@ def list_models(session: Session = Depends(get_db)) -> list[dict]:
 )
 def list_latest_study_area_versions(
     session: Session = Depends(get_db),
+    rainfall_mode: Literal["design", "real"] = "design",
 ) -> list[StudyAreaLatestVersion]:
     """Return the latest version ID for each built-in study area (LC and JJ)."""
     try:
         return [
             StudyAreaLatestVersion.model_validate(item)
-            for item in ModelService().list_latest_study_area_versions(session)
+            for item in ModelService().list_latest_study_area_versions(session, rainfall_mode)
         ]
     except Exception as exc:
         raise translate_service_error(exc) from exc

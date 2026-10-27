@@ -18,6 +18,8 @@
 .simulation-projection output { padding: 6px 8px; color: #102a37; border: 1px solid #23748c; background: rgba(104,196,206,.13); font: 12px Consolas,monospace; }
 .simulation-projection em { grid-column: 1 / -1; }
 .rainfall-settings { margin: 8px 0 16px; }
+.rainfall-note { margin: 8px 0 0; color: #53676e; font-size: 11px; line-height: 1.6; }
+.simulation-setting-fields input[readonly], .rainfall-setting-fields input[readonly] { color: #53676e; background: #e8eeee; border-color: #cbd6d6; cursor: default; }
 .rainfall-heading { margin-top: 10px; }
 .rainfall-setting-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(16,42,55,.1); }
 .rainfall-setting-fields label { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.74); }

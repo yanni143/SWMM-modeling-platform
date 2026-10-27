@@ -1,10 +1,9 @@
 import { useEffect } from 'react';
 import '@/assets/css/ModelWorkspace.css';
-import {
-  latestLisfloodInputUrl,
-  latestLisfloodVirtualRainfallUrl,
-} from '@/api/models';
+import { latestLisfloodInputUrl, latestLisfloodVirtualRainfallUrl } from '@/api/models';
+import type { RainfallMode } from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
+import { studyAreaName } from '@/utils/studyAreas';
 import ParameterTuning from './ParameterTuning';
 
 const formatBytes = (value: number | null) =>
@@ -16,7 +15,6 @@ const formatTime = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
-const studyAreaName = (name: string) => ({ LC: '老城', JJ: '金江' }[name] ?? name);
 
 export default function ModelWorkspace() {
   const store = useModelStore();
@@ -36,16 +34,18 @@ export default function ModelWorkspace() {
     <aside className="model-workspace" aria-label="工程工作台">
       <div className="workspace-heading">
         <div>
-          <p className="workspace-kicker">
-            SWMM STUDY AREA
-          </p>
+          <p className="workspace-kicker">SWMM STUDY AREA</p>
           <h2>{selected ? studyAreaName(selected.name) : '模型工作台'}</h2>
         </div>
         <div className="workspace-status">
           <span className="system-state">
             <i /> INP READY
           </span>
-          <button type="button" onClick={() => void store.loadModels()}>
+          <button
+            type="button"
+            disabled={store.loading || store.savingVersion || store.running}
+            onClick={() => void store.loadModels()}
+          >
             刷新
           </button>
         </div>
@@ -64,12 +64,39 @@ export default function ModelWorkspace() {
                 className="ledger-select"
                 value={store.selectedModelId ?? ''}
                 aria-label="选择研究区"
-                disabled={store.running}
-                onChange={(event) => event.target.value && void store.selectModel(event.target.value)}
+                disabled={store.running || store.savingVersion || store.loading}
+                onChange={(event) =>
+                  event.target.value && void store.selectModel(event.target.value)
+                }
               >
                 {store.models.map((model) => (
                   <option key={model.id} value={model.id}>
                     {studyAreaName(model.name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {selected.rainfall_inputs.length > 0 && (
+            <label className="study-area-picker">
+              <span>降雨方案</span>
+              <select
+                className="ledger-select"
+                aria-label="选择降雨方案"
+                value={store.rainfallMode}
+                disabled={
+                  store.running ||
+                  store.savingVersion ||
+                  store.loading ||
+                  selected.rainfall_inputs.length < 2
+                }
+                onChange={(event) =>
+                  void store.selectRainfallInput(event.target.value as RainfallMode)
+                }
+              >
+                {selected.rainfall_inputs.map((item) => (
+                  <option key={item.mode} value={item.mode}>
+                    {item.label}
                   </option>
                 ))}
               </select>
@@ -82,11 +109,11 @@ export default function ModelWorkspace() {
             </div>
             <div>
               <span>版本数</span>
-              <strong>{selected.version_count}</strong>
+              <strong>{store.versions.length}</strong>
             </div>
             <div>
               <span>最新版本</span>
-              <strong>V{selected.latest_version ?? '—'}</strong>
+              <strong>V{store.versions[0]?.version ?? '—'}</strong>
             </div>
           </div>
         </section>
@@ -101,6 +128,7 @@ export default function ModelWorkspace() {
             className="ledger-select"
             value={store.selectedVersionId ?? ''}
             aria-label="选择工程版本"
+            disabled={store.running || store.savingVersion || store.loading}
             onChange={(event) => event.target.value && void store.selectVersion(event.target.value)}
           >
             {store.versions.map((version) => (
@@ -112,7 +140,9 @@ export default function ModelWorkspace() {
           <button
             className="run-action"
             type="button"
-            disabled={store.running || !store.selectedVersionId}
+            disabled={
+              store.running || store.savingVersion || store.loading || !store.selectedVersionId
+            }
             onClick={run}
           >
             {store.running ? '正在运行并解析结果…' : '运行当前版本'}
@@ -164,7 +194,7 @@ export default function ModelWorkspace() {
       <button
         className="reset-action"
         type="button"
-        disabled={store.running}
+        disabled={store.running || store.savingVersion || store.loading}
         onClick={reset}
       >
         恢复初始状态
