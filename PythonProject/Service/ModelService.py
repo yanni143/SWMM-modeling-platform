@@ -17,13 +17,12 @@ from Tools.InpTools.InpGeoJson import build_geojson_layers
 from Tools.InpTools.InpInspector import inspect_section, summarize_sections
 from Tools.InpTools.InpParameterEditor import (
     apply_parameter_changes,
-    apply_simulation_options,
     build_parameter_catalog,
     build_simulation_options,
 )
-from Tools.InpTools.InpRainfallEditor import apply_rainfall_options, build_rainfall_options
 from Tools.InpTools.InpParser import INPParser
 from Tools.InpTools.InpValidator import InpValidationResult, validate_inp_file
+from Tools.InpTools.RainfallScenario import apply_rainfall_scenario, rainfall_catalog
 
 
 class ModelNotFoundError(LookupError):
@@ -224,13 +223,16 @@ class ModelService:
         )
 
     def get_parameter_catalog(self, session: Session, version_id: uuid.UUID) -> dict:
-        _, validation = self._download_and_validate(session, version_id)
+        version, validation = self._download_and_validate(session, version_id)
+        study_area = next(
+            seed.name for seed in STUDY_AREA_SEEDS if seed.model_id == version.model_id
+        )
         simulation_options = build_simulation_options(validation.sections, self.settings)
         return {
             "groups": build_parameter_catalog(validation.sections),
             "simulation_options": simulation_options,
-            "rainfall_options": build_rainfall_options(
-                validation.sections, simulation_options["duration_seconds"]
+            "rainfall_options": rainfall_catalog(
+                validation.sections, study_area, self.settings
             ),
         }
 
@@ -263,11 +265,6 @@ class ModelService:
             content, _ = INPFileHandler.read_file(str(source_path))
             if not content:
                 raise ValueError("无法读取父版本 INP")
-            original_sections = INPParser.parse(content)
-            original_simulation = build_simulation_options(original_sections, self.settings)
-            original_rainfall = build_rainfall_options(
-                original_sections, original_simulation["duration_seconds"]
-            )
             adjusted_content = content
             applied = []
             if changes:
@@ -275,38 +272,20 @@ class ModelService:
                     adjusted_content, changes
                 )
                 applied.extend(parameter_changes)
-            if simulation_options:
-                parsed_sections = INPParser.parse(adjusted_content)
-                adjusted_content, option_changes = apply_simulation_options(
-                    adjusted_content,
-                    parsed_sections,
-                    simulation_options,
-                    self.settings,
-                )
-                applied.extend(option_changes)
-            parsed_sections = INPParser.parse(adjusted_content)
-            effective_simulation = build_simulation_options(parsed_sections, self.settings)
-            requested_rainfall = rainfall_options or {
-                "start_seconds": original_rainfall["start_seconds"],
-                "duration_seconds": original_rainfall["duration_seconds"],
-                "total_rainfall_mm": original_rainfall["total_rainfall_mm"],
-            }
-            if rainfall_options or (
-                original_rainfall["end_seconds"] > effective_simulation["duration_seconds"]
-            ):
-                adjusted_content, rainfall_changes = apply_rainfall_options(
-                    adjusted_content,
-                    parsed_sections,
-                    requested_rainfall,
-                    effective_simulation["duration_seconds"],
-                )
-                applied.extend(rainfall_changes)
+            study_area = next(seed.name for seed in STUDY_AREA_SEEDS if seed.model_id == model.id)
+            adjusted_content, scenario_changes = apply_rainfall_scenario(
+                adjusted_content, study_area, self.settings, simulation_options, rainfall_options
+            )
+            applied.extend(scenario_changes)
             if not applied:
                 raise ValueError("提交的参数没有发生变化")
             message = INPFileHandler.write_file(str(target_path), adjusted_content)
             if message.startswith("错误"):
                 raise OSError(message)
             validate_inp_file(target_path)
+            final_rainfall = rainfall_catalog(
+                INPParser.parse(adjusted_content), study_area, self.settings
+            )
 
             latest = session.scalar(
                 select(func.max(ModelVersion.version)).where(ModelVersion.model_id == model.id)
@@ -326,6 +305,8 @@ class ModelService:
                     "source": "parameter_adjustment",
                     "summary": summary or f"调整 {len(applied)} 项常用参数",
                     "change_count": len(applied),
+                    "rainfall_mode": final_rainfall["mode"],
+                    "rainfall_event_id": final_rainfall["event_id"],
                 },
                 created_by=created_by,
             )

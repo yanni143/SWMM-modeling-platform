@@ -1,4 +1,5 @@
 export interface WorkspaceState {
+  selectedModelId?: string
   selectedVersionId?: string
   activeResultVersionId?: string | null
   layerOrder?: string[]

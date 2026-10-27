@@ -33,31 +33,36 @@ export const useModelStore = create<ModelState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const models = await fetchModels(); set({ models })
-      const initialModel = models[0]
+      const savedModelId = loadWorkspaceState().selectedModelId
+      const initialModel = models.find((model) => model.id === savedModelId) ?? models[0]
       if (!initialModel) throw new Error('研究区尚未初始化')
       if (selectInitialModel) await get().selectModel(initialModel.id)
     } catch (error) { set({ error: errorText(error, '研究区加载失败') }) }
     finally { set({ loading: false }) }
   },
   async selectModel(modelId) {
-    set({ selectedModelId: modelId, selectedVersionId: null, sections: [], sectionDetail: null, availableResults: [], activeResultVersionId: null, loading: true, error: null })
+    saveWorkspaceState({ selectedModelId: modelId })
+    set({ selectedModelId: modelId, selectedVersionId: null, versions: [], sections: [], sectionDetail: null, parameterGroups: [], simulationOptions: null, rainfallOptions: null, availableResults: [], activeResultVersionId: null, loading: true, error: null })
     try {
-      const versions = await fetchVersions(modelId); set({ versions })
+      const versions = await fetchVersions(modelId)
+      if (get().selectedModelId !== modelId) return
+      set({ versions })
       const saved = loadWorkspaceState().selectedVersionId
       const initial = versions.find((item) => item.id === saved) ?? versions.find((item) => item.version === 1) ?? versions[0]
       if (initial) await get().selectVersion(initial.id)
       await get().loadModelResults()
-    } catch (error) { set({ error: errorText(error, '工程版本加载失败') }) }
-    finally { set({ loading: false }) }
+    } catch (error) { if (get().selectedModelId === modelId) set({ error: errorText(error, '工程版本加载失败') }) }
+    finally { if (get().selectedModelId === modelId) set({ loading: false }) }
   },
   async selectVersion(versionId) {
     set({ selectedVersionId: versionId, selectedSectionName: null, sectionDetail: null, loading: true, error: null })
     try {
       const [sections, editable] = await Promise.all([fetchSections(versionId), fetchEditableParameters(versionId)])
+      if (get().selectedVersionId !== versionId) return
       set({ sections, parameterGroups: editable.groups, simulationOptions: editable.simulation_options, rainfallOptions: editable.rainfall_options })
       saveWorkspaceState({ selectedVersionId: versionId })
-    } catch (error) { set({ error: errorText(error, 'INP 分区读取失败') }) }
-    finally { set({ loading: false }) }
+    } catch (error) { if (get().selectedVersionId === versionId) set({ error: errorText(error, 'INP 分区读取失败') }) }
+    finally { if (get().selectedVersionId === versionId) set({ loading: false }) }
   },
   async selectSection(sectionName) {
     const id = get().selectedVersionId; if (!id) return
@@ -74,10 +79,12 @@ export const useModelStore = create<ModelState>((set, get) => ({
     finally { set({ running: false }) }
   },
   async loadModelResults() {
+    const modelId = get().selectedModelId
     try {
-      const availableResults = await fetchModelResults(get().selectedModelId ?? undefined); const saved = loadWorkspaceState().activeResultVersionId
+      const availableResults = await fetchModelResults(modelId ?? undefined); const saved = loadWorkspaceState().activeResultVersionId
+      if (get().selectedModelId !== modelId) return
       set({ availableResults, activeResultVersionId: availableResults.some((item) => item.version_id === saved) ? saved ?? null : null })
-    } catch (error) { set({ error: errorText(error, '历史模拟结果加载失败') }) }
+    } catch (error) { if (get().selectedModelId === modelId) set({ error: errorText(error, '历史模拟结果加载失败') }) }
   },
   activateResultVersion(versionId) {
     if (versionId && !get().availableResults.some((item) => item.version_id === versionId)) return

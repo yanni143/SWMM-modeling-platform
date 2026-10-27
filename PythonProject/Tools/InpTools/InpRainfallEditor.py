@@ -1,15 +1,17 @@
+import math
 import re
 from datetime import datetime, timedelta
 from typing import Any
 
-from Tools.InpTools.InpParameterEditor import ParameterValidationError
 from Tools.InpTools.ChicagoRainfall import PEAK_RATIO, STEP_MINUTES, chicago_intensity_series
-
+from Tools.InpTools.InpParameterEditor import ParameterValidationError
 
 CHICAGO_R = PEAK_RATIO
 DT_SECONDS = STEP_MINUTES * 60
 DESIGN_RAIN_MARKER = ";@DESIGN_RAIN"
 DESIGN_RAIN_FORMULA = "runswmm_chicago"
+REAL_RAIN_MARKER = ";@REAL_RAIN"
+DESIGN_BACKUP_MARKER = ";@DESIGN_BACKUP"
 
 
 def _records(lines: list[str]) -> list[list[str]]:
@@ -97,18 +99,45 @@ def _infer_existing_options(
         except (ValueError, OverflowError):
             continue
         values.append((max(0, int((stamp - start).total_seconds())), value))
-    nonzero = [(offset, value) for offset, value in values if value > 0]
+    # Read the rain-gage format before interpreting values. Cumulative depths
+    # must be differenced; treating them as intensities greatly inflates rain.
+    gage = next(
+        tokens for tokens in _records(sections.get("RAINGAGES", []))
+        if len(tokens) >= 6 and tokens[5].lower() == series_name.lower()
+    )
+    rain_format = gage[1].upper()
+    interval = gage[2].split(":")
+    step_seconds = (
+        int(interval[0]) * 3600 + int(interval[1]) * 60
+        if len(interval) == 2 else round(float(gage[2]) * 3600)
+    )
+    if step_seconds <= 0:
+        raise ParameterValidationError("雨量计记录间隔必须大于 0")
+    if rain_format == "CUMULATIVE":
+        previous = 0.0
+        increments = []
+        for offset, value in values:
+            increments.append((offset, value - previous if value >= previous else value))
+            previous = value
+        intensities = [(offset, value * 3600 / step_seconds) for offset, value in increments]
+    elif rain_format == "VOLUME":
+        intensities = [(offset, value * 3600 / step_seconds) for offset, value in values]
+    else:
+        intensities = values
+    nonzero = [(offset, value) for offset, value in intensities if value > 0]
     if not nonzero:
         rain_start, rain_end, peak_model, total_mm = 0, simulation_duration, 0.0, 0.0
     else:
         rain_start = nonzero[0][0]
-        rain_end = min(simulation_duration, nonzero[-1][0] + DT_SECONDS)
+        rain_end = min(simulation_duration, nonzero[-1][0] + step_seconds)
         peak_model = max(value for _, value in nonzero)
     flow_units = _option(sections, "FLOW_UNITS").upper()
     imperial = flow_units in {"CFS", "GPM", "MGD"}
     conversion = 25.4 if imperial else 1.0
     if nonzero:
-        total_mm = sum(value * conversion for _, value in nonzero) * DT_SECONDS / 3600.0
+        total_mm = round(
+            math.fsum(value * conversion for _, value in nonzero) * step_seconds / 3600.0, 10
+        )
     peak_mm_h = peak_model * conversion
     return {
         "start_seconds": rain_start,
@@ -118,6 +147,7 @@ def _infer_existing_options(
         "peak_rainfall_mm_h": peak_mm_h,
         "peak_ratio": CHICAGO_R,
         "formula": "existing_timeseries",
+        "time_step_seconds": step_seconds,
     }
 
 
@@ -147,9 +177,19 @@ def build_rainfall_options(
         {
             "gage_name": gage_name,
             "series_name": series_name,
-            "time_step_seconds": DT_SECONDS,
+            "time_step_seconds": current.get("time_step_seconds", DT_SECONDS),
+            "mode": "design",
+            "event_id": None,
+            "read_only": False,
         }
     )
+    for line in sections.get("TIMESERIES", []):
+        if line.strip().startswith(REAL_RAIN_MARKER + " "):
+            current.update(
+                mode="real", event_id=line.strip().split()[1], read_only=True,
+                start_seconds=0, duration_seconds=simulation_duration,
+                end_seconds=simulation_duration, formula="observed_cumulative",
+            )
     return current
 
 
@@ -171,7 +211,7 @@ def _validate(values: dict[str, Any], simulation_duration: int) -> tuple[int, in
         raise ParameterValidationError("降雨结束时间不能超过模拟时长")
     if start % DT_SECONDS or duration % DT_SECONDS:
         raise ParameterValidationError(f"降雨开始时间和时长必须是 {DT_SECONDS} 秒的整数倍")
-    if total_rainfall <= 0 or total_rainfall == float("inf") or total_rainfall != total_rainfall:
+    if total_rainfall <= 0 or not math.isfinite(total_rainfall):
         raise ParameterValidationError("总降雨量必须是大于 0 的有限数值")
     return start, duration, end, total_rainfall
 
@@ -246,6 +286,7 @@ def apply_rainfall_options(
         if tokens and not line.lstrip().startswith(";"):
             upper = [token.upper() for token in tokens]
             if "TIMESERIES" in upper and upper.index("TIMESERIES") >= 4:
+                tokens[1] = "INTENSITY"
                 tokens[2] = "0:05"
                 line = " ".join(tokens)
         rain_gages.append(line)
@@ -255,6 +296,8 @@ def apply_rainfall_options(
         for line in sections.get("TIMESERIES", [])
         if not (
             line.strip().startswith(DESIGN_RAIN_MARKER)
+            or line.strip().startswith(REAL_RAIN_MARKER)
+            or line.strip().startswith(DESIGN_BACKUP_MARKER)
             or (
                 line.split()
                 and not line.lstrip().startswith(";")

@@ -146,6 +146,31 @@ export interface SimulationOptions {
   require_report_step_divisible: boolean
 }
 
+export type RainfallMode = 'design' | 'real'
+
+export interface DesignRainfallDefaults {
+  start_datetime: string
+  duration_seconds: number
+  report_step_seconds: number
+  start_seconds: number
+  rain_duration_seconds: number
+  total_rainfall_mm: number
+}
+
+export interface RealRainfallEvent {
+  event_id: string
+  label: string
+  start_datetime: string
+  end_datetime: string
+  simulation_duration_seconds: number
+  report_step_seconds: number
+  start_seconds: number
+  duration_seconds: number
+  total_rainfall_mm: number
+  peak_rainfall_mm_h: number
+  time_step_seconds: number
+}
+
 export interface RainfallOptions {
   start_seconds: number
   duration_seconds: number
@@ -157,6 +182,12 @@ export interface RainfallOptions {
   time_step_seconds: number
   peak_ratio: number
   formula: string
+  mode: RainfallMode
+  event_id: string | null
+  read_only: boolean
+  available_modes: RainfallMode[]
+  real_event: RealRainfallEvent | null
+  design_defaults: DesignRainfallDefaults | null
 }
 
 export interface EditableParametersResponse {
@@ -170,7 +201,11 @@ export interface SimulationOptionsInput {
   report_step_seconds: number
 }
 
-export interface RainfallOptionsInput {
+export type RainfallOptionsInput = {
+  mode: 'real'
+  event_id: string
+} | {
+  mode?: 'design'
   start_seconds: number
   duration_seconds: number
   total_rainfall_mm: number
