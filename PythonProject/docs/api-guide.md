@@ -4,13 +4,19 @@
 
 ## 1. 系统约束
 
-- 系统是固定研究区系统，后端启动时会幂等初始化 LC、JJ 两个研究区及各自的基线 V1。
+- 系统是固定研究区系统：LC 为老城，JJ 为金江；接口继续使用 `LC`、`JJ` 编码。
+- 后端启动时幂等初始化两区的模拟降雨基线 V1，并为金江登记真实降雨的独立完整 INP 基线。
+- 金江可选 `design`（模拟降雨）或 `real`（真实降雨），老城仅支持 `design`。切换方案是选择对应的版本，不是参数修改，无需先创建新版本即可运行。
+- 模拟降雨的默认模拟时长上限为 172800 秒（48 小时），实际限制以参数目录返回值为准。
+- 真实降雨固定覆盖 2026-09-13 00:00 至 2026-09-15 00:00，模拟时长 172800 秒、降雨开始偏移 0 秒、资料覆盖时长 172800 秒、总雨量 226.2 mm；工程参数及输出步长仍可调整。
 - 不提供用户上传 INP 文件的接口。
 - 参数调整不会覆盖原版本，而是以指定版本为父版本创建一个新版本。
 - 同一版本允许执行多次模拟。数据库和 MinIO 保留每次运行，但面向用户的历史结果列表只展示每个版本最新一次成功运行。
 - 地图结果接口只返回最后一个模拟时间步，避免同一几何重复压盖。
 - 时间序列接口返回指定对象的全部时间步，供结果弹窗和图表使用。
 - 当前接口没有鉴权机制。
+
+真实降雨基线来自 `resources/rainfall/jj/JJ_real_20260913_2d.inp`，采用 5 分钟累计雨量。资料覆盖时长包含无雨时段。版本号在同一研究区内统一递增，真实降雨基线不是固定的 V2；应使用 `rainfall_inputs[].baseline_version_id` 定位方案基线，使用版本的 `rainfall_mode` 区分方案。两个方案都可以包含多个调参版本。
 
 ## 2. 基础约定
 
@@ -30,8 +36,9 @@ http://localhost:8000
 - INP 下载响应：`text/plain; charset=utf-8`
 - LISFLOOD 点源输入下载响应：`application/json`，文件名为 `rate_<研究区>_without_sub.json`
 - LISFLOOD 虚拟降雨下载响应：`text/plain; charset=utf-8`，文件名为 `chi_<研究区>.txt`
-- ID：标准 UUID 字符串，例如 `00000000-0000-0000-0000-000000000101`
-- 时间：ISO 8601 字符串，例如 `2026-08-11T05:59:30.123456Z`
+- ID：标准 UUID 字符串，例如 `10000000-0000-0000-0000-000000000101`
+- 数据库记录时间：ISO 8601 字符串，例如 `2026-08-11T05:59:30.123456Z`
+- 模拟开始/结束时间和结果 `timestamp`：模型中的无时区时间，例如 `2026-09-13T00:05:00`；不应自行按浏览器时区平移
 - GeoJSON 坐标：地图输出统一为 `EPSG:4326`，坐标顺序为 `[longitude, latitude]`
 - JSON 字段为 `null` 时表示该值不存在或当前结果无法提供
 
@@ -62,7 +69,10 @@ FastAPI 默认提供：
   "detail": [
     {
       "type": "uuid_parsing",
-      "loc": ["path", "version_id"],
+      "loc": [
+        "path",
+        "version_id"
+      ],
       "msg": "Input should be a valid UUID",
       "input": "invalid-id"
     }
@@ -87,7 +97,7 @@ FastAPI 默认提供：
 | --- | --- | --- |
 | `GET` | `/health` | 检查数据库和 MinIO 状态 |
 | `GET` | `/api/models` | 获取固定研究区模型列表 |
-| `GET` | `/api/study-areas/latest-model-versions` | 获取 LC、JJ 两个研究区各自最新的版本 ID |
+| `GET` | `/api/study-areas/latest-model-versions` | 按降雨方案获取研究区最新版本 ID，默认 `design` |
 | `GET` | `/api/models/{model_id}` | 获取模型详情 |
 | `GET` | `/api/models/{model_id}/versions` | 获取模型的全部版本 |
 | `GET` | `/api/model-versions/{version_id}/sections` | 获取版本中的 INP section 摘要 |
@@ -114,15 +124,16 @@ FastAPI 默认提供：
 
 ```json
 {
-  "id": "00000000-0000-0000-0000-000000000101",
-  "model_id": "00000000-0000-0000-0000-000000000001",
+  "id": "10000000-0000-0000-0000-000000000101",
+  "model_id": "10000000-0000-0000-0000-000000000001",
   "parent_version_id": null,
   "version": 1,
   "checksum": "7d8f...",
   "size_bytes": 872653,
   "change_summary": null,
   "created_by": "system",
-  "created_at": "2026-08-11T05:30:00Z"
+  "created_at": "2026-08-11T05:30:00Z",
+  "rainfall_mode": "design"
 }
 ```
 
@@ -130,13 +141,16 @@ FastAPI 默认提供：
 | --- | --- | --- |
 | `id` | UUID | 版本 ID |
 | `model_id` | UUID | 所属模型 ID |
-| `parent_version_id` | UUID \| null | 父版本；初始版本为 `null` |
+| `parent_version_id` | UUID \| null | 父版本；各内置输入基线均为 `null`，不能仅据此判断降雨类型 |
 | `version` | integer | 用户可见版本号，如 `1`、`2` |
 | `checksum` | string \| null | MinIO 对象校验值 |
 | `size_bytes` | integer \| null | INP 文件大小 |
 | `change_summary` | object \| null | 本版本的修改摘要 |
 | `created_by` | string \| null | 创建者 |
 | `created_at` | datetime | 创建时间 |
+| `rainfall_mode` | string | `design` 或 `real`；没有降雨类型摘要的历史版本按 `design` 返回 |
+
+调参版本继承父版本的降雨方案。`change_summary` 会记录 `rainfall_mode` 和 `rainfall_event_id`；实测基线的 `source` 为 `system_rainfall_input`，实测事件标识为 `jj_real_20260913_2d`。这些新增字段不改变现有版本 ID。
 
 ### 4.2 地图图层 `GeoJsonLayer`
 
@@ -183,11 +197,12 @@ FastAPI 默认提供：
 ```json
 {
   "name": "211",
-  "time": 11
+  "time_index": 11,
+  "timestamp": "2025-07-15T01:00:00"
 }
 ```
 
-其中 `time` 是从 `0` 开始的模拟时间步索引，不是 ISO 时间。不同结果图层还包含：
+其中 `time_index` 是从 `0` 开始的时间步索引，`timestamp` 是模型时间。历史产物可能使用旧字段 `time`，读取时可用 `properties.time_index ?? properties.time` 兼容。不同结果图层还包含：
 
 | 图层 | 结果字段 |
 | --- | --- |
@@ -223,9 +238,20 @@ FastAPI 默认提供：
 
 `GET /api/study-areas/latest-model-versions`
 
-用途：供 LISFLOOD 获取 LC、JJ 两个内置研究区当前最新的模型版本。最新版本按该研究区的最大版本号（`version`）确定；接口稳定按 `LC`、`JJ` 顺序返回。取得 `version_id` 后，可调用对应的 `latest-result/lisflood-input` 和 `latest-result/lisflood-virtual-rainfall` 接口下载输入数据。
+用途：供 LISFLOOD 按降雨方案获取内置研究区当前最新的模型版本。在选定方案内按最大版本号（`version`）确定，而不是跨方案取最大值。模拟降雨按 `LC`、`JJ` 顺序返回，真实降雨仅返回 `JJ`。取得 `version_id` 后，可调用对应的 `latest-result/lisflood-input` 和 `latest-result/lisflood-virtual-rainfall` 下载接口。
 
-请求：无参数、无请求体。
+查询参数（无请求体）：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `rainfall_mode` | string | 否 | `design` | `design` 为模拟降雨，`real` 为真实降雨；其他值返回 `422` |
+
+```http
+GET /api/study-areas/latest-model-versions
+GET /api/study-areas/latest-model-versions?rainfall_mode=real
+```
+
+不传参数现在明确表示查询模拟降雨方案；原有调用若想取得真实降雨的最新版本，必须指定 `rainfall_mode=real`。最新模型版本可能尚未运行成功，此时其 `latest-result/*` 接口返回 `422`，本接口不会回退到上一个有结果的版本。
 
 响应：`200 OK`，返回 `StudyAreaLatestVersion[]`。
 
@@ -251,7 +277,7 @@ FastAPI 默认提供：
 | `study_area` | string | 稳定的研究区编码：`LC` 或 `JJ` |
 | `model_id` | UUID | 研究区模型 ID |
 | `version_id` | UUID | 后续 LISFLOOD 下载接口所需的版本 ID |
-| `version` | integer | 该研究区当前最新的版本号 |
+| `version` | integer | 该研究区所选降雨方案内的最新版本号 |
 
 ### 6.2 获取模型列表
 
@@ -266,21 +292,64 @@ FastAPI 默认提供：
 ```json
 [
   {
-    "id": "00000000-0000-0000-0000-000000000001",
-    "name": "汾湖演示研究区",
-    "description": "系统内置的固定 SWMM 演示研究区",
+    "id": "10000000-0000-0000-0000-000000000001",
+    "name": "LC",
+    "description": "LC_MANUAL_23 SWMM 研究区",
     "status": "active",
     "created_at": "2026-08-11T05:30:00Z",
     "updated_at": "2026-08-11T05:30:00Z",
-    "version_count": 3,
-    "latest_version": 3
+    "version_count": 1,
+    "latest_version": 1,
+    "rainfall_inputs": [
+      {
+        "mode": "design",
+        "label": "模拟降雨",
+        "baseline_version_id": "10000000-0000-0000-0000-000000000101",
+        "filename": "model.inp"
+      }
+    ]
+  },
+  {
+    "id": "20000000-0000-0000-0000-000000000001",
+    "name": "JJ",
+    "description": "JJ_MANUAL_7 SWMM 研究区",
+    "status": "active",
+    "created_at": "2026-08-11T05:30:00Z",
+    "updated_at": "2026-08-11T05:30:00Z",
+    "version_count": 2,
+    "latest_version": 2,
+    "rainfall_inputs": [
+      {
+        "mode": "design",
+        "label": "模拟降雨",
+        "baseline_version_id": "20000000-0000-0000-0000-000000000101",
+        "filename": "model.inp"
+      },
+      {
+        "mode": "real",
+        "label": "真实降雨（20260913）",
+        "baseline_version_id": "20000000-0000-0000-0000-000000000102",
+        "filename": "JJ_real_20260913_2d.inp"
+      }
+    ]
   }
 ]
 ```
 
-`latest_version` 在没有版本时可能为 `null`。
+以上为全新部署的示意数据，升级已有系统时版本数与编号可能不同。`latest_version` 在没有版本时可能为 `null`。`version_count` 和 `latest_version` 是整个研究区的统计，包含两个降雨方案；不能用它们判断当前方案的最新版本。
 
-### 6.2 获取模型详情
+`rainfall_inputs` 为可选输入方案数组：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `mode` | string | `design` 或 `real` |
+| `label` | string | 方案显示名称 |
+| `baseline_version_id` | UUID | 可直接加载、运行的基线版本 ID |
+| `filename` | string | 内置源 INP 的文件名 |
+
+模型列表顺序不作保证。前端应将 `LC` 显示为“老城”、`JJ` 显示为“金江”，方案选项以各模型的 `rainfall_inputs` 为准。模型详情接口不包含列表专有的统计字段和 `rainfall_inputs`。
+
+### 6.3 获取模型详情
 
 `GET /api/models/{model_id}`
 
@@ -294,9 +363,9 @@ FastAPI 默认提供：
 
 ```json
 {
-  "id": "00000000-0000-0000-0000-000000000001",
-  "name": "汾湖演示研究区",
-  "description": "系统内置的固定 SWMM 演示研究区",
+  "id": "10000000-0000-0000-0000-000000000001",
+  "name": "LC",
+  "description": "LC_MANUAL_23 SWMM 研究区",
   "status": "active",
   "created_at": "2026-08-11T05:30:00Z",
   "updated_at": "2026-08-11T05:30:00Z"
@@ -305,33 +374,34 @@ FastAPI 默认提供：
 
 可能错误：`404` 模型不存在；`422` UUID 格式错误；`503` MinIO 不可用；`500` 工程服务异常。
 
-### 6.3 获取模型版本列表
+### 6.4 获取模型版本列表
 
 `GET /api/models/{model_id}/versions`
 
 路径参数：`model_id`，UUID。
 
-响应：`200 OK`，返回 `ModelVersionRead[]`。通常按服务定义的版本顺序返回。
+响应：`200 OK`，返回 `ModelVersionRead[]`，按版本号降序排列。该列表包含研究区全部降雨方案；本接口没有 `rainfall_mode` 筛选参数。前端应按返回的 `rainfall_mode` 筛选，再选择相应 `baseline_version_id` 或该方案中已保存的版本。
 
 ```json
 [
   {
-    "id": "00000000-0000-0000-0000-000000000101",
-    "model_id": "00000000-0000-0000-0000-000000000001",
+    "id": "10000000-0000-0000-0000-000000000101",
+    "model_id": "10000000-0000-0000-0000-000000000001",
     "parent_version_id": null,
     "version": 1,
     "checksum": "7d8f...",
     "size_bytes": 872653,
     "change_summary": null,
     "created_by": "system",
-    "created_at": "2026-08-11T05:30:00Z"
+    "created_at": "2026-08-11T05:30:00Z",
+    "rainfall_mode": "design"
   }
 ]
 ```
 
 可能错误：`404` 模型不存在；`422` UUID 格式错误；`503` MinIO 不可用；`500` 工程服务异常。
 
-### 6.4 获取版本 INP section 摘要
+### 6.5 获取版本 INP section 摘要
 
 `GET /api/model-versions/{version_id}/sections`
 
@@ -343,7 +413,7 @@ FastAPI 默认提供：
 
 ```json
 {
-  "version_id": "00000000-0000-0000-0000-000000000101",
+  "version_id": "10000000-0000-0000-0000-000000000101",
   "sections": [
     {
       "name": "SUBCATCHMENTS",
@@ -367,7 +437,7 @@ FastAPI 默认提供：
 
 可能错误：`404` 版本不存在；`422` INP 无效或 UUID 格式错误；`503` MinIO 不可用。
 
-### 6.5 获取单个 INP section
+### 6.6 获取单个 INP section
 
 `GET /api/model-versions/{version_id}/sections/{section_name}`
 
@@ -384,7 +454,7 @@ section 名称在服务中会转换为大写。
 
 ```json
 {
-  "version_id": "00000000-0000-0000-0000-000000000101",
+  "version_id": "10000000-0000-0000-0000-000000000101",
   "section": {
     "name": "CONDUITS",
     "editable": true,
@@ -427,7 +497,7 @@ section 名称在服务中会转换为大写。
 
 可能错误：`404` 版本或 section 不存在；`422` UUID 格式错误、INP 无效；`503` MinIO 不可用。
 
-### 6.6 获取原始 INP 地图图层
+### 6.7 获取原始 INP 地图图层
 
 `GET /api/model-versions/{version_id}/layers`
 
@@ -439,7 +509,7 @@ section 名称在服务中会转换为大写。
 
 ```json
 {
-  "version_id": "00000000-0000-0000-0000-000000000101",
+  "version_id": "10000000-0000-0000-0000-000000000101",
   "layers": [
     {
       "id": "inp-subcatchments",
@@ -455,7 +525,22 @@ section 名称在服务中会转换为大写。
             "type": "Feature",
             "geometry": {
               "type": "Polygon",
-              "coordinates": [[[120.84, 31.03], [120.85, 31.03], [120.84, 31.03]]]
+              "coordinates": [
+                [
+                  [
+                    120.84,
+                    31.03
+                  ],
+                  [
+                    120.85,
+                    31.03
+                  ],
+                  [
+                    120.84,
+                    31.03
+                  ]
+                ]
+              ]
             },
             "properties": {
               "name": "S1",
@@ -478,11 +563,11 @@ section 名称在服务中会转换为大写。
 
 可能错误：`404` 版本不存在；`422` INP 无效；`503` MinIO 不可用。
 
-### 6.7 获取可调参数目录
+### 6.8 获取可调参数目录
 
 `GET /api/model-versions/{version_id}/editable-parameters`
 
-用途：为前端调参面板返回安全、受限的对象字段目录、模拟设置和设计降雨设置。
+用途：为前端调参面板返回安全、受限的对象字段目录、模拟设置，以及当前输入方案的降雨设置和只读状态。
 
 路径参数：`version_id`，UUID。
 
@@ -490,7 +575,7 @@ section 名称在服务中会转换为大写。
 
 ```json
 {
-  "version_id": "00000000-0000-0000-0000-000000000101",
+  "version_id": "10000000-0000-0000-0000-000000000101",
   "groups": [
     {
       "id": "subcatchments",
@@ -502,14 +587,14 @@ section 名称在服务中会转换为大写。
           "element_type": "subcatchment",
           "fields": [
             {
-              "key": "SUBCATCHMENTS.area",
+              "key": "SUBCATCHMENTS.imperv",
               "section": "SUBCATCHMENTS",
-              "field": "area",
-              "label": "Area",
-              "unit": "ha",
-              "value": "1.2",
-              "minimum": 0.0001,
-              "maximum": 100000,
+              "field": "imperv",
+              "label": "不透水率",
+              "unit": "%",
+              "value": "35",
+              "minimum": 0,
+              "maximum": 100,
               "step": 0.1
             }
           ]
@@ -524,7 +609,7 @@ section 名称在服务中会转换为大写。
     "report_step_seconds": 600,
     "routing_step_seconds": 10.0,
     "duration_min_seconds": 60,
-    "duration_max_seconds": 86400,
+    "duration_max_seconds": 172800,
     "report_step_min_seconds": 10,
     "max_output_steps": 1000,
     "require_report_step_divisible": false
@@ -534,12 +619,16 @@ section 名称在服务中会转换为大写。
     "duration_seconds": 7200,
     "end_seconds": 7200,
     "total_rainfall_mm": 120.0,
-    "peak_rainfall_mm_h": 207.48,
+    "peak_rainfall_mm_h": 129.23,
     "gage_name": "RG1",
     "series_name": "Rainfall01",
-    "time_step_seconds": 60,
-    "peak_ratio": 0.43,
-    "formula": "haikou_chicago"
+    "time_step_seconds": 300,
+    "peak_ratio": 0.4,
+    "formula": "runswmm_chicago",
+    "mode": "design",
+    "event_id": null,
+    "read_only": false,
+    "real_event": null
   }
 }
 ```
@@ -574,13 +663,37 @@ section 名称在服务中会转换为大写。
 | `rainfall_options.peak_rainfall_mm_h` | number | 生成曲线的峰值雨强，单位 mm/h，只读 |
 | `rainfall_options.gage_name` | string | `[RAINGAGES]` 中使用该时间序列的雨量计名称 |
 | `rainfall_options.series_name` | string | 被替换的 `[TIMESERIES]` 时间序列名称 |
-| `rainfall_options.time_step_seconds` | integer | 设计降雨生成步长，当前为 60 秒 |
-| `rainfall_options.peak_ratio` | number | 峰现系数，当前为 0.43 |
-| `rainfall_options.formula` | string | 设计降雨公式标识 |
+| `rainfall_options.time_step_seconds` | integer | 时间序列间隔；新生成的模拟降雨和当前实测事件均为 300 秒，旧序列按雨量计间隔读取 |
+| `rainfall_options.peak_ratio` | number | 设计降雨峰现系数为 0.4；真实降雨模式不使用该系数生成曲线 |
+| `rainfall_options.formula` | string | 新设计降雨为 `runswmm_chicago`，未带设计元数据的序列为 `existing_timeseries`，真实降雨为 `observed_cumulative` |
+| `rainfall_options.mode` | string | 当前版本对应的 `design` 或 `real` |
+| `rainfall_options.event_id` | string \| null | 真实降雨为 `jj_real_20260913_2d`，模拟降雨为 `null` |
+| `rainfall_options.read_only` | boolean | 为 `true` 时降雨开始、时长及总雨量只读；模拟时长同时固定为实测覆盖时长，工程参数及输出步长仍可调整 |
+| `rainfall_options.real_event` | object \| null | 金江返回内置实测事件元数据，即使当前版本属于模拟降雨；老城为 `null` |
 
-后端仅解析带有 `schema=2` 的 `;@DESIGN_RAIN` 注释。没有该标记的旧注释和没有注释的基线版本，都会根据现有降雨时间序列的非零范围、累计雨量和峰值推算当前设置；新创建的设计降雨版本会写入 `schema=2` 元数据以便准确回显。
+设计降雨元数据仅解析带有 `schema=2` 的 `;@DESIGN_RAIN` 注释。没有该标记的旧注释和没有注释的基线版本，都会根据现有降雨时间序列的非零范围、累计雨量和峰值推算当前设置；新创建的设计降雨版本会写入 `schema=2` 元数据以便准确回显。
 
-### 6.8 创建调参版本
+真实降雨原始 INP 不需要该注释，其类型来自版本元数据。`CUMULATIVE` 累计雨量按相邻值差分统计，总雨量为 226.2 mm，峰值雨强为 132 mm/h；不能将累计值直接按雨强求和。
+
+`real_event` 示例（这里的 `duration_seconds` 为降雨资料覆盖时长，`simulation_duration_seconds` 为固定模拟时长）：
+
+```json
+{
+  "event_id": "jj_real_20260913_2d",
+  "label": "真实降雨（20260913）",
+  "start_datetime": "2026-09-13T00:00:00",
+  "end_datetime": "2026-09-15T00:00:00",
+  "simulation_duration_seconds": 172800,
+  "report_step_seconds": 300,
+  "start_seconds": 0,
+  "duration_seconds": 172800,
+  "total_rainfall_mm": 226.2,
+  "peak_rainfall_mm_h": 132.0,
+  "time_step_seconds": 300
+}
+```
+
+### 6.9 创建调参版本
 
 `POST /api/model-versions/{version_id}/versions`
 
@@ -638,24 +751,52 @@ Content-Type: application/json
 | `changes[].field` | 是 | string，1 到 100 字符 |
 | `changes[].new_value` | 是 | string，1 到 100 字符 |
 | `simulation_options` | 条件必填 | 对象或 `null`；提供时必须同时包含以下两个字段 |
-| `simulation_options.duration_seconds` | 是 | 严格整数，且在服务端配置的允许范围内 |
+| `simulation_options.duration_seconds` | 是 | 严格整数，默认范围 60～172800 秒；真实降雨固定 172800 秒 |
 | `simulation_options.report_step_seconds` | 是 | 严格整数，不小于路由步长、不大于模拟时长，并满足最大输出点约束 |
-| `rainfall_options` | 条件必填 | 对象或 `null`；提供时必须同时包含以下三个字段 |
-| `rainfall_options.start_seconds` | 是 | 严格整数且不小于 0，必须为 60 秒的整数倍 |
-| `rainfall_options.duration_seconds` | 是 | 严格正整数，必须为 60 秒的整数倍 |
-| `rainfall_options.total_rainfall_mm` | 是 | 严格正数且为有限值，单位 mm |
+| `rainfall_options` | 条件必填 | 对象或 `null`；模拟降雨提供时必须同时包含开始、时长、总雨量三个字段 |
+| `rainfall_options.mode` | 否 | 默认 `design`；必须与父版本方案一致，不用于切换输入方案 |
+| `rainfall_options.event_id` | 否 | 模拟降雨必须省略或为 `null`；真实降雨仅支持 `jj_real_20260913_2d` |
+| `rainfall_options.start_seconds` | 模拟降雨必填 | 严格整数且不小于 0，必须为 300 秒的整数倍 |
+| `rainfall_options.duration_seconds` | 模拟降雨必填 | 严格正整数，必须为 300 秒的整数倍 |
+| `rainfall_options.total_rainfall_mm` | 模拟降雨必填 | 严格正数且为有限值，单位 mm |
+
+原有仅提交三个数值的模拟降雨请求仍受支持。真实降雨版本修改工程参数时，省略 `rainfall_options`；修改输出步长时提交 `simulation_options`，同时保持 `duration_seconds=172800`。若显式提供真实降雨配置，必须设置 `mode=real`，且提供的数值必须与实测事件一致；仅提交未变化的事件配置不能创建新版本。方案切换应直接选择另一个方案的版本 ID，跨方案保存返回 `422`。
+
+例如，基于金江真实降雨基线调整管道粗糙度，无需提交任何降雨字段（对象名称以参数目录为准）：
+
+```http
+POST /api/model-versions/20000000-0000-0000-0000-000000000102/versions
+Content-Type: application/json
+```
+
+```json
+{
+  "summary": "调整实测方案管道粗糙度",
+  "changes": [
+    {
+      "section": "CONDUITS",
+      "target": "C4",
+      "field": "roughness",
+      "new_value": "0.02"
+    }
+  ]
+}
+```
+
+该请求创建新的 `rainfall_mode=real` 版本，保留原实测降雨序列及时间范围。
+
+两天模拟使用 300 秒输出步长为 576 个输出点，在默认 1000 点限制内；300 秒是实测文件的初始输出步长，用户可以在现有约束内修改。
 
 设计降雨生成和写入规则：
 
-- 后端采用海口地方暴雨强度公式、峰现系数 `0.43` 的标准芝加哥雨型。
-- 公式参数为 `A=2795.883`、`C=0.490`、`b=19.757 min`、`n=0.642`；公式计算使用分钟和 `L/(s·ha)`，写入前转换为 `mm/h` 或英制 `in/h`。
-- 标准曲线使用内部参考重现期 `p_ref=1`，最终幅度由 `total_rainfall_mm` 缩放确定。
-- 后端先生成标准曲线，再按离散累计雨量缩放到 `total_rainfall_mm`。
-- 起雨前与停雨后的时间点写入 0；降雨区间按 60 秒步长生成。
+- 后端采用 `Tools/InpTools/ChicagoRainfall.py` 中的样例算法，标识为 `runswmm_chicago`，峰现系数 `r=0.4`。
+- 原始权重为 `20 / (abs(t - 0.4 * T) + 8)^0.7`，其中 `t`、`T` 以分钟计；再统一缩放使离散总雨量等于 `total_rainfall_mm`。当前不接收重现期参数。
+- 起雨前与停雨后的时间点写入 0；降雨区间按 300 秒步长生成。
 - 后端根据 `[RAINGAGES]` 的 `TIMESERIES` 引用定位目标名称，只替换该名称在 `[TIMESERIES]` 中的记录，其他时间序列保持不变。
-- 雨量计记录间隔同步为 `0:01`。英制流量模型写入前会将 mm/h 转换为 in/h。
+- 雨量计格式同步为 `INTENSITY`，记录间隔为 `0:05`。英制流量模型写入前会将 mm/h 转换为 in/h。
 - 第一版要求所有使用内嵌时间序列的雨量计引用同一个降雨时间序列；否则返回 `422`。
 - `end_seconds` 由 `start_seconds + duration_seconds` 计算；同时修改模拟时长和降雨时，以修改后的模拟时长校验降雨结束时间。
+- 这些生成规则仅用于模拟降雨；真实降雨版本调整工程参数或输出步长时保留完整实测序列。
 
 响应：`201 Created`。
 
@@ -663,8 +804,8 @@ Content-Type: application/json
 {
   "version": {
     "id": "da2e27c4-7dfa-4b0b-a1a4-77bce5710ff0",
-    "model_id": "00000000-0000-0000-0000-000000000001",
-    "parent_version_id": "00000000-0000-0000-0000-000000000101",
+    "model_id": "10000000-0000-0000-0000-000000000001",
+    "parent_version_id": "10000000-0000-0000-0000-000000000101",
     "version": 2,
     "checksum": "9a31...",
     "size_bytes": 872701,
@@ -672,7 +813,8 @@ Content-Type: application/json
       "summary": "调整子汇水区不透水率与管道粗糙系数"
     },
     "created_by": "demo-user",
-    "created_at": "2026-08-11T06:00:00Z"
+    "created_at": "2026-08-11T06:00:00Z",
+    "rainfall_mode": "design"
   },
   "changes": [
     {
@@ -692,10 +834,10 @@ Content-Type: application/json
 可能错误：
 
 - `404`：父版本不存在。
-- `422`：字段不可编辑、对象不存在、数值越界、降雨范围超过模拟时长、重现期不受支持、存在多个不同降雨时间序列、请求体不符合约束或生成的 INP 无效。
+- `422`：字段不可编辑、对象不存在、数值越界、降雨范围超过模拟时长、修改真实降雨固定条件、试图跨方案保存、存在多个不同降雨时间序列、提交内容未变化、请求体不符合约束或生成的 INP 无效。
 - `503`：MinIO 不可用。
 
-### 6.9 下载版本 INP
+### 6.10 下载版本 INP
 
 `GET /api/model-versions/{version_id}/download`
 
@@ -729,7 +871,7 @@ Content-Disposition: attachment; filename="model-v2.inp"
 ```json
 {
   "run_id": "c8b121e0-264f-4b2f-8179-8b230c4a00ae",
-  "model_version_id": "00000000-0000-0000-0000-000000000101",
+  "model_version_id": "10000000-0000-0000-0000-000000000101",
   "version": 1,
   "status": "success",
   "layers": [
@@ -751,14 +893,15 @@ Content-Disposition: attachment; filename="model-v2.inp"
             },
             "properties": {
               "name": "S1",
-              "time": 11,
               "rain": 0.0,
               "runoff": 0.0021,
               "infilt": 0.0,
               "evap": 0.0,
               "snow": 0.0,
               "gw_flow": null,
-              "soil_moist": null
+              "soil_moist": null,
+              "time_index": 11,
+              "timestamp": "2025-07-15T01:00:00"
             }
           }
         ]
@@ -798,14 +941,16 @@ Content-Disposition: attachment; filename="model-v2.inp"
 
 用途：按工程版本聚合成功运行。每个版本只返回最新一次成功运行，用于历史结果下拉框。
 
-请求：无参数、无请求体。
+查询参数：可选 `model_id`（UUID），不传时返回全部模型的成功结果；无请求体。
+
+此接口没有 `rainfall_mode` 参数。金江结果列表可能同时包含两套方案，前端需将 `version_id` 与当前方案的版本 ID 集合关联过滤；响应本身不包含降雨类型字段。
 
 响应：`200 OK`。
 
 ```json
 [
   {
-    "version_id": "00000000-0000-0000-0000-000000000101",
+    "version_id": "10000000-0000-0000-0000-000000000101",
     "version": 1,
     "effective_run_id": "c8b121e0-264f-4b2f-8179-8b230c4a00ae",
     "created_at": "2026-08-11T05:59:00Z",
@@ -828,7 +973,7 @@ Content-Disposition: attachment; filename="model-v2.inp"
 
 ```json
 {
-  "version_id": "00000000-0000-0000-0000-000000000101",
+  "version_id": "10000000-0000-0000-0000-000000000101",
   "version": 1,
   "effective_run_id": "c8b121e0-264f-4b2f-8179-8b230c4a00ae",
   "created_at": "2026-08-11T05:59:00Z",
@@ -850,7 +995,7 @@ Content-Disposition: attachment; filename="model-v2.inp"
 }
 ```
 
-响应中的每个对象只保留最后一个 `time`。完整时序应通过下一接口查询。
+响应中的每个对象只保留最后一个 `time_index`（历史数据可能为 `time`）。完整时序应通过下一接口查询。
 
 可能错误：`422` 版本不存在或该版本没有成功结果；`503` MinIO 不可用。
 
@@ -876,7 +1021,7 @@ Content-Disposition: attachment; filename="model-v2.inp"
 请求示例：
 
 ```http
-GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/timeseries?layer_id=result-subcatchments&feature_name=S1
+GET /api/model-versions/10000000-0000-0000-0000-000000000101/latest-result/timeseries?layer_id=result-subcatchments&feature_name=S1
 ```
 
 允许的 `layer_id`：
@@ -885,7 +1030,7 @@ GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/times
 - `result-conduits`
 - `result-nodes`
 
-响应：`200 OK`，返回 GeoJSON FeatureCollection。Feature 按 `properties.time` 升序排列。
+响应：`200 OK`，返回 GeoJSON FeatureCollection。Feature 按时间步索引升序排列（优先 `properties.time_index`，兼容历史 `properties.time`）。响应还包含 `field_metadata`，提供各结果字段的单位；单位由模型 `FLOW_UNITS` 决定。
 
 ```json
 {
@@ -899,14 +1044,15 @@ GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/times
       },
       "properties": {
         "name": "S1",
-        "time": 0,
         "rain": 0.0,
         "runoff": 0.0,
         "infilt": 0.0,
         "evap": 0.0,
         "snow": 0.0,
         "gw_flow": null,
-        "soil_moist": null
+        "soil_moist": null,
+        "time_index": 0,
+        "timestamp": "2025-07-15T00:05:00"
       }
     },
     {
@@ -917,17 +1063,41 @@ GET /api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/times
       },
       "properties": {
         "name": "S1",
-        "time": 1,
         "rain": 1.3,
         "runoff": 0.12,
         "infilt": 0.4,
         "evap": 0.0,
         "snow": 0.0,
         "gw_flow": null,
-        "soil_moist": null
+        "soil_moist": null,
+        "time_index": 1,
+        "timestamp": "2025-07-15T00:10:00"
       }
     }
-  ]
+  ],
+  "field_metadata": {
+    "rain": {
+      "unit": "mm/hr"
+    },
+    "snow": {
+      "unit": "mm"
+    },
+    "evap": {
+      "unit": "mm/hr"
+    },
+    "infilt": {
+      "unit": "mm/hr"
+    },
+    "runoff": {
+      "unit": "L/s"
+    },
+    "gw_flow": {
+      "unit": "L/s"
+    },
+    "soil_moist": {
+      "unit": null
+    }
+  }
 }
 ```
 
@@ -1003,7 +1173,10 @@ JSON 结构：
     {
       "node": "J181",
       "rate": 3.550278,
-      "coordinate": [396826.8302363448, 2184008.14446223]
+      "coordinate": [
+        396826.8302363448,
+        2184008.14446223
+      ]
     }
   ]
 }
@@ -1049,31 +1222,82 @@ TS1H29_CHI       07/15/2025 01:00:00  0.0000
 
 如果 RPT 中缺少 `Final Storage`，或其值小于等于零，SWMM 运行仍会成功，点源输入仍可下载；虚拟降雨 artifact 不会生成，对应虚拟降雨下载接口返回 `422`。历史运行在此功能上线前没有该 artifact，也需要重新运行后才能下载。
 
+真实降雨方案仍使用上述 LISFLOOD 文件结构与生成规则。虚拟降雨表示 RPT 中的地表滞蓄水量，并非原始实测降雨序列；原始实测数据可通过对应版本的 INP 下载接口取得。
+
 可能错误：`422` 运行/版本不存在、没有成功运行或该运行没有可用虚拟降雨；`503` MinIO 不可用。
+
+### 7.7 获取结果时间轴
+
+`GET /api/model-versions/{version_id}/latest-result/timeline`
+
+路径参数：`version_id`，UUID；无查询参数、无请求体。返回指定版本最新成功结果的完整时间轴、数值字段范围与单位，响应模型为 `ResultTimeline`。
+
+以下示例仅展示首尾两项，实际 `steps` 返回全部输出时间步：
+
+```json
+{
+  "version_id": "20000000-0000-0000-0000-000000000102",
+  "version": 2,
+  "effective_run_id": "c8b121e0-264f-4b2f-8179-8b230c4a00ae",
+  "steps": [
+    {"time_index": 0, "timestamp": "2026-09-13T00:05:00"},
+    {"time_index": 575, "timestamp": "2026-09-15T00:00:00"}
+  ],
+  "result_ranges": {
+    "result-nodes": {
+      "depth": {"minimum": 0.0, "maximum": 1.2}
+    }
+  },
+  "result_metadata": {
+    "result-nodes": {
+      "depth": {"unit": "m"}
+    }
+  }
+}
+```
+
+`version` 和数值范围仅作示意，实际值取决于部署历史与运行结果。`time_index` 从 0 开始；`timestamp` 为模型时间，旧产物可能为 `null`。`result_ranges` 按图层 ID、数值字段名索引，跨全部时间步统计；`result_metadata` 包含字段单位，量纲为比例或无单位时为 `null`。两天模拟采用 300 秒输出步长时有 576 项，首项是第 5 分钟，末项是第 48 小时。
+
+可能错误：`422` 版本不存在、没有成功结果或缺少结果产物；`503` MinIO 不可用。
+
+### 7.8 获取指定时间步结果
+
+`GET /api/model-versions/{version_id}/latest-result/steps/{time_index}`
+
+路径参数：`version_id`（UUID）、`time_index`（integer）；无请求体。应使用时间轴接口返回的索引。
+
+响应：`200 OK`，返回与最新结果地图接口相同的 `VersionResultLayers` 结构，但 `layers` 仅包含所选时间步的 Feature。返回的 `effective_run_id` 标识该次查询实际使用的最新成功运行；若在交互期间完成了新运行，应重新加载时间轴。
+
+```http
+GET /api/model-versions/20000000-0000-0000-0000-000000000102/latest-result/steps/575
+```
+
+不存在的时间步索引当前返回 `200`，各图层的 `features` 为空；不是 `404`。非整数索引返回 FastAPI `422`。其他可能错误：`422` 版本不存在或没有成功结果；`503` MinIO 不可用。
 
 ## 8. 推荐前端调用流程
 
 ### 8.1 初始化
 
-1. 调用 `GET /api/models` 获取固定模型。
-2. 调用 `GET /api/models/{model_id}/versions` 获取版本列表。
-3. 调用 `GET /api/model-versions/{version_id}/layers` 加载原始 INP 地图。
-4. 调用 `GET /api/model-versions/{version_id}/editable-parameters` 初始化调参面板。
-5. 调用 `GET /api/model-results` 恢复有成功结果的版本列表。
+1. 调用 `GET /api/models`，选择研究区及其 `rainfall_inputs` 中的降雨方案。
+2. 调用 `GET /api/models/{model_id}/versions`，按 `rainfall_mode` 筛选版本。首次进入方案时使用其 `baseline_version_id`，后续可恢复该方案已选择的版本。
+3. 调用所选版本的 `/layers` 和 `/editable-parameters`，加载对应完整 INP 的地图与参数。
+4. 调用 `GET /api/model-results?model_id={model_id}`，与当前方案版本 ID 集合关联后展示历史结果。
+5. 按研究区及降雨方案分别保存所选版本、活动结果。切换时清理旧参数和图层，并忽略已失效的异步响应，防止混用。
 
 ### 8.2 调参和运行
 
-1. 根据可调参数目录构造 `changes`、`simulation_options` 和/或 `rainfall_options`。
-2. 调用 `POST /api/model-versions/{parent_version_id}/versions` 创建新版本。
-3. 调用 `POST /api/model-versions/{new_version_id}/runs` 运行新版本。
-4. 使用响应中的最后时间步 `layers` 更新地图。
+1. 未修改参数时，直接调用 `POST /api/model-versions/{selected_version_id}/runs`；切换方案本身不调用创建版本接口。
+2. 修改参数后，根据当前参数目录构造 `changes`、`simulation_options` 和/或 `rainfall_options`，再调用 `POST /api/model-versions/{parent_version_id}/versions`。
+3. 真实降雨模式锁定模拟时长和三项降雨数值；工程参数修改可照常保存，降雨序列保持不变。新版本继承父版本方案。
+4. 运行新版本，使用响应中的最后时间步 `layers` 更新地图，并重新加载当前方案的结果列表。
 
 ### 8.3 历史结果和弹窗
 
-1. 使用 `GET /api/model-results` 展示每个版本的最新成功结果。
+1. 按当前研究区及方案筛选历史结果，展示每个版本的最新成功运行。
 2. 用户选择版本后调用 `GET /api/model-versions/{version_id}/latest-result/layers`。
 3. 用户点击结果对象后，使用图层 ID、对象 `properties.name` 和版本 ID 调用时间序列接口。
-4. 参数图表使用返回 Feature 的 `properties.time` 作为横轴索引，对应结果字段作为纵轴。
+4. 图表使用 `properties.timestamp` 展示模型时间，`properties.time_index ?? properties.time` 作为索引，字段单位读取 `field_metadata`。
+5. 动画和时间步选择先加载 `/latest-result/timeline`，再按索引调用 `/latest-result/steps/{time_index}`。
 
 ## 9. cURL 示例
 
@@ -1083,11 +1307,20 @@ TS1H29_CHI       07/15/2025 01:00:00  0.0000
 curl http://localhost:8000/api/models
 ```
 
+按降雨方案查询最新版本（实测查询仅返回金江）：
+
+```bash
+curl http://localhost:8000/api/study-areas/latest-model-versions
+curl "http://localhost:8000/api/study-areas/latest-model-versions?rainfall_mode=real"
+```
+
+以下调参示例使用老城基线。运行和下载示例中的版本 ID 应替换为本次实际选择或新建的版本 ID，`target`、`feature_name` 应以该版本返回的对象名称为准。
+
 创建调参版本：
 
 ```bash
 curl -X POST \
-  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/versions \
+  http://localhost:8000/api/model-versions/10000000-0000-0000-0000-000000000101/versions \
   -H "Content-Type: application/json" \
   -d '{
     "summary": "调整 S1 不透水率和设计降雨",
@@ -1100,6 +1333,10 @@ curl -X POST \
         "new_value": "42"
       }
     ],
+    "simulation_options": {
+      "duration_seconds": 7200,
+      "report_step_seconds": 300
+    },
     "rainfall_options": {
       "start_seconds": 600,
       "duration_seconds": 4800,
@@ -1112,28 +1349,35 @@ curl -X POST \
 
 ```bash
 curl -X POST \
-  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/runs
+  http://localhost:8000/api/model-versions/10000000-0000-0000-0000-000000000101/runs
+```
+
+直接运行内置实测基线（无需先保存参数）：
+
+```bash
+curl -X POST \
+  http://localhost:8000/api/model-versions/20000000-0000-0000-0000-000000000102/runs
 ```
 
 查询时间序列：
 
 ```bash
-curl "http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/timeseries?layer_id=result-subcatchments&feature_name=S1"
+curl "http://localhost:8000/api/model-versions/10000000-0000-0000-0000-000000000101/latest-result/timeseries?layer_id=result-subcatchments&feature_name=S1"
 ```
 
 下载 INP：
 
 ```bash
 curl -OJ \
-  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/download
+  http://localhost:8000/api/model-versions/10000000-0000-0000-0000-000000000101/download
 ```
 
 下载当前版本最新成功运行的 LISFLOOD 方案三输入：
 
 ```bash
 curl -OJ \
-  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/lisflood-input
+  http://localhost:8000/api/model-versions/10000000-0000-0000-0000-000000000101/latest-result/lisflood-input
 
 curl -OJ \
-  http://localhost:8000/api/model-versions/00000000-0000-0000-0000-000000000101/latest-result/lisflood-virtual-rainfall
+  http://localhost:8000/api/model-versions/10000000-0000-0000-0000-000000000101/latest-result/lisflood-virtual-rainfall
 ```
