@@ -1,27 +1,30 @@
 export interface WorkspaceState {
-  selectedModelId?: string
-  selectedVersionId?: string
-  activeResultVersionId?: string | null
-  layerOrder?: string[]
-  layerVisibility?: Record<string, boolean>
+  selectedModelId?: string;
+  rainfallModes?: Record<string, 'design' | 'real'>;
+  selectedVersionsByInput?: Record<string, string>;
+  activeResultsByInput?: Record<string, string | null>;
+  selectedVersionId?: string;
+  activeResultVersionId?: string | null;
+  layerOrder?: string[];
+  layerVisibility?: Record<string, boolean>;
 }
 
-const WORKSPACE_STATE_KEY = 'swmm-workspace:v1'
+const WORKSPACE_STATE_KEY = 'swmm-workspace:v1';
 
 export function loadWorkspaceState(): WorkspaceState {
   try {
-    const raw = window.localStorage.getItem(WORKSPACE_STATE_KEY)
-    return raw ? (JSON.parse(raw) as WorkspaceState) : {}
+    const raw = window.localStorage.getItem(WORKSPACE_STATE_KEY);
+    return raw ? (JSON.parse(raw) as WorkspaceState) : {};
   } catch {
-    return {}
+    return {};
   }
 }
 
 export function saveWorkspaceState(patch: Partial<WorkspaceState>): void {
-  const next = { ...loadWorkspaceState(), ...patch }
-  window.localStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify(next))
+  const next = { ...loadWorkspaceState(), ...patch };
+  window.localStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify(next));
 }
 
 export function clearWorkspaceState(): void {
-  window.localStorage.removeItem(WORKSPACE_STATE_KEY)
+  window.localStorage.removeItem(WORKSPACE_STATE_KEY);
 }

@@ -1,11 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import '@/assets/css/ParameterTuning.css';
-import type {
-  DesignRainfallDefaults,
-  EditableField,
-  ModelVersion,
-  RainfallMode,
-} from '@/api/models';
+import type { EditableField, ModelVersion } from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
 
 interface Draft {
@@ -40,13 +35,11 @@ export default function ParameterTuning() {
   const [batchKey, setBatchKey] = useState('');
   const [batchOperation, setBatchOperation] = useState<'set' | 'add' | 'percent'>('set');
   const [batchAmount, setBatchAmount] = useState('');
-  const [duration, setDuration] = useState(0);
-  const [reportStep, setReportStep] = useState(0);
-  const [rainStart, setRainStart] = useState(0);
-  const [rainDuration, setRainDuration] = useState(0);
-  const [rainfall, setRainfall] = useState(0);
-  const [rainMode, setRainMode] = useState<RainfallMode>('design');
-  const designDraft = useRef<DesignRainfallDefaults | null>(null);
+  const [duration, setDuration] = useState(store.simulationOptions?.duration_seconds ?? 0);
+  const [reportStep, setReportStep] = useState(store.simulationOptions?.report_step_seconds ?? 0);
+  const [rainStart, setRainStart] = useState(store.rainfallOptions?.start_seconds ?? 0);
+  const [rainDuration, setRainDuration] = useState(store.rainfallOptions?.duration_seconds ?? 0);
+  const [rainfall, setRainfall] = useState(store.rainfallOptions?.total_rainfall_mm ?? 0);
   const group = groups.find((item) => item.id === groupId);
   const objects = group?.objects ?? [];
   const filtered = objects.filter((item) =>
@@ -63,19 +56,14 @@ export default function ParameterTuning() {
   const options = store.simulationOptions;
   const rainOptions = store.rainfallOptions;
   const realEvent = rainOptions?.real_event;
-  const rainLocked = rainMode === 'real';
-  const modeChanged = !!rainOptions && rainMode !== rainOptions.mode;
-  const startDatetime = rainLocked
-    ? realEvent?.start_datetime
-    : rainOptions?.mode === 'real'
-      ? rainOptions.design_defaults?.start_datetime
-      : options?.start_datetime;
+  const rainLocked = rainOptions?.read_only ?? false;
+  const startDatetime = options?.start_datetime;
   const durationChanged = duration !== options?.duration_seconds;
   const stepChanged = reportStep !== options?.report_step_seconds;
   const rainChanged =
     !!rainOptions &&
-    (modeChanged ||
-      rainStart !== rainOptions.start_seconds ||
+    !rainLocked &&
+    (rainStart !== rainOptions.start_seconds ||
       rainDuration !== rainOptions.duration_seconds ||
       rainfall !== rainOptions.total_rainfall_mm);
   const minStep = Math.max(
@@ -118,55 +106,16 @@ export default function ParameterTuning() {
               ? '总降雨量必须是大于 0 的有效数值'
               : '';
   const error = localError || simulationError || rainError;
-  const nextVersion = Math.max(...store.versions.map((item) => item.version), 0) + 1;
+  const nextVersion = Math.max(...store.allVersions.map((item) => item.version), 0) + 1;
   useEffect(() => {
     setDuration(options?.duration_seconds ?? 0);
     setReportStep(options?.report_step_seconds ?? 0);
   }, [options]);
   useEffect(() => {
-    setRainMode(rainOptions?.mode ?? 'design');
-    designDraft.current = null;
     setRainStart(rainOptions?.start_seconds ?? 0);
     setRainDuration(rainOptions?.duration_seconds ?? 0);
     setRainfall(rainOptions?.total_rainfall_mm ?? 0);
   }, [rainOptions]);
-  const changeRainMode = (next: RainfallMode) => {
-    if (next === rainMode || !rainOptions?.available_modes.includes(next)) return;
-    if (next === 'real' && realEvent) {
-      designDraft.current = {
-        start_datetime: startDatetime ?? '',
-        duration_seconds: duration,
-        report_step_seconds: reportStep,
-        start_seconds: rainStart,
-        rain_duration_seconds: rainDuration,
-        total_rainfall_mm: rainfall,
-      };
-      setDuration(realEvent.simulation_duration_seconds);
-      setRainStart(realEvent.start_seconds);
-      setRainDuration(realEvent.duration_seconds);
-      setRainfall(realEvent.total_rainfall_mm);
-      if (
-        reportStep < minStep ||
-        reportStep > realEvent.simulation_duration_seconds ||
-        Math.floor(realEvent.simulation_duration_seconds / reportStep) >
-          (options?.max_output_steps ?? 1000) ||
-        (options?.require_report_step_divisible &&
-          realEvent.simulation_duration_seconds % reportStep)
-      ) {
-        setReportStep(realEvent.report_step_seconds);
-      }
-    } else if (next === 'design') {
-      const restored = designDraft.current ?? rainOptions.design_defaults;
-      if (!restored) return;
-      setDuration(restored.duration_seconds);
-      setReportStep(restored.report_step_seconds);
-      setRainStart(restored.start_seconds);
-      setRainDuration(restored.rain_duration_seconds);
-      setRainfall(restored.total_rainfall_mm);
-    }
-    setLocalError('');
-    setRainMode(next);
-  };
   useEffect(() => {
     if (!groups.some((item) => item.id === groupId)) {
       setGroupId(groups[0]?.id ?? '');
@@ -212,8 +161,6 @@ export default function ParameterTuning() {
   const clear = () => {
     setDrafts({});
     setLocalError('');
-    setRainMode(rainOptions?.mode ?? 'design');
-    designDraft.current = null;
     setDuration(options?.duration_seconds ?? 0);
     setReportStep(options?.report_step_seconds ?? 0);
     setRainStart(rainOptions?.start_seconds ?? 0);
@@ -302,18 +249,16 @@ export default function ParameterTuning() {
         new_value: draft.newValue,
       })),
       summary || undefined,
-      durationChanged || stepChanged || modeChanged
+      durationChanged || stepChanged
         ? { duration_seconds: duration, report_step_seconds: reportStep }
         : undefined,
       rainChanged
-        ? rainLocked && realEvent
-          ? { mode: 'real', event_id: realEvent.event_id }
-          : {
-              mode: 'design',
-              start_seconds: rainStart,
-              duration_seconds: rainDuration,
-              total_rainfall_mm: rainfall,
-            }
+        ? {
+            mode: 'design',
+            start_seconds: rainStart,
+            duration_seconds: rainDuration,
+            total_rainfall_mm: rainfall,
+          }
         : undefined,
     );
     if (result) {
@@ -350,33 +295,12 @@ export default function ParameterTuning() {
           </span>
         )}
       </div>
-      {rainOptions && (
-        <div className="rainfall-mode-setting">
-          <label>
-            <span>降雨类型</span>
-            {rainOptions.available_modes.includes('real') ? (
-              <select
-                aria-label="降雨类型"
-                value={rainMode}
-                disabled={store.savingVersion || store.running}
-                onChange={(event) => changeRainMode(event.target.value as RainfallMode)}
-              >
-                <option value="design">模拟降雨</option>
-                <option value="real">{realEvent?.label ?? '真实降雨（20260913）'}</option>
-              </select>
-            ) : (
-              <strong>模拟降雨</strong>
-            )}
-          </label>
-          {rainLocked && realEvent && (
-            <p id="rainfall-lock-note" role="note">
-              实测资料：{realEvent.start_datetime.replace('T', ' ')} 至{' '}
-              {realEvent.end_datetime.replace('T', ' ')}。
-              模拟时长、降雨开始、降雨时长和总雨量由资料确定，只读；工程参数仍可修改。
-            </p>
-          )}
-          {modeChanged && <p role="status">降雨类型尚未保存，请生成新版本后运行。</p>}
-        </div>
+      {rainLocked && realEvent && (
+        <p id="rainfall-lock-note" className="rainfall-note" role="note">
+          实测资料：{realEvent.start_datetime.replace('T', ' ')} 至{' '}
+          {realEvent.end_datetime.replace('T', ' ')}。
+          模拟时长、降雨开始、降雨时长和总雨量由资料确定，只读；工程参数仍可修改。
+        </p>
       )}
       {options && (
         <div className="simulation-settings">
@@ -495,9 +419,6 @@ export default function ParameterTuning() {
               </small>
             </div>
           </div>
-          {rainOptions.mode === 'real' && !rainLocked && (
-            <p className="rainfall-note">峰值将在保存模拟降雨后更新。</p>
-          )}
         </div>
       )}
       <div className="engineering-heading tuning-heading">
@@ -691,15 +612,7 @@ export default function ParameterTuning() {
               全部撤销
             </button>
           </div>
-          {modeChanged && (
-            <Change
-              label="降雨类型"
-              oldValue={rainOptions?.mode === 'real' ? '真实降雨（20260913）' : '模拟降雨'}
-              newValue={rainLocked ? '真实降雨（20260913）' : '模拟降雨'}
-              onRemove={() => changeRainMode(rainOptions!.mode)}
-            />
-          )}
-          {durationChanged && !modeChanged && (
+          {durationChanged && (
             <Change
               label="模拟时长"
               oldValue={`${options?.duration_seconds} 秒`}
@@ -715,7 +628,7 @@ export default function ParameterTuning() {
               onRemove={() => setReportStep(options?.report_step_seconds ?? 0)}
             />
           )}
-          {rainChanged && !modeChanged && (
+          {rainChanged && (
             <Change
               label="模拟降雨"
               oldValue={`${time(rainOptions!.start_seconds)}–${time(rainOptions!.start_seconds + rainOptions!.duration_seconds)} · ${rainOptions!.total_rainfall_mm} mm`}

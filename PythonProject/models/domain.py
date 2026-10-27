@@ -68,6 +68,11 @@ class ModelVersion(TimestampMixin, Base):
     change_summary: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
     created_by: Mapped[Optional[str]] = mapped_column(String(100))
 
+    @property
+    def rainfall_mode(self) -> str:
+        # Existing versions without a mode belong to the original design input.
+        return "real" if (self.change_summary or {}).get("rainfall_mode") == "real" else "design"
+
     model: Mapped[SwmmModel] = relationship(back_populates="versions")
     parent_version: Mapped[Optional["ModelVersion"]] = relationship(remote_side=[id])
     parameter_changes: Mapped[list["ModelParameterChange"]] = relationship(

@@ -44,15 +44,6 @@ class SimulationOptions(BaseModel):
     require_report_step_divisible: bool
 
 
-class DesignRainfallDefaults(BaseModel):
-    start_datetime: str
-    duration_seconds: int
-    report_step_seconds: int
-    start_seconds: int
-    rain_duration_seconds: int
-    total_rainfall_mm: float
-
-
 class RealRainfallEvent(BaseModel):
     event_id: str
     label: str
@@ -81,9 +72,7 @@ class RainfallOptions(BaseModel):
     mode: Literal["design", "real"] = "design"
     event_id: Optional[str] = None
     read_only: bool = False
-    available_modes: list[Literal["design", "real"]] = Field(default_factory=lambda: ["design"])
     real_event: Optional[RealRainfallEvent] = None
-    design_defaults: Optional[DesignRainfallDefaults] = None
 
 
 class ParameterCatalogResponse(BaseModel):

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import '@/assets/css/ModelWorkspace.css';
 import { latestLisfloodInputUrl, latestLisfloodVirtualRainfallUrl } from '@/api/models';
+import type { RainfallMode } from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
 import { studyAreaName } from '@/utils/studyAreas';
 import ParameterTuning from './ParameterTuning';
@@ -76,6 +77,31 @@ export default function ModelWorkspace() {
               </select>
             </label>
           )}
+          {selected.rainfall_inputs.length > 0 && (
+            <label className="study-area-picker">
+              <span>降雨方案</span>
+              <select
+                className="ledger-select"
+                aria-label="选择降雨方案"
+                value={store.rainfallMode}
+                disabled={
+                  store.running ||
+                  store.savingVersion ||
+                  store.loading ||
+                  selected.rainfall_inputs.length < 2
+                }
+                onChange={(event) =>
+                  void store.selectRainfallInput(event.target.value as RainfallMode)
+                }
+              >
+                {selected.rainfall_inputs.map((item) => (
+                  <option key={item.mode} value={item.mode}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <div className="model-facts">
             <div>
               <span>状态</span>
@@ -83,11 +109,11 @@ export default function ModelWorkspace() {
             </div>
             <div>
               <span>版本数</span>
-              <strong>{selected.version_count}</strong>
+              <strong>{store.versions.length}</strong>
             </div>
             <div>
               <span>最新版本</span>
-              <strong>V{selected.latest_version ?? '—'}</strong>
+              <strong>V{store.versions[0]?.version ?? '—'}</strong>
             </div>
           </div>
         </section>
