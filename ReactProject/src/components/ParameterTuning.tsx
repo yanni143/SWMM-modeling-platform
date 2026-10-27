@@ -295,13 +295,6 @@ export default function ParameterTuning() {
           </span>
         )}
       </div>
-      {rainLocked && realEvent && (
-        <p id="rainfall-lock-note" className="rainfall-note" role="note">
-          实测资料：{realEvent.start_datetime.replace('T', ' ')} 至{' '}
-          {realEvent.end_datetime.replace('T', ' ')}。
-          模拟时长、降雨开始、降雨时长和总雨量由资料确定，只读；工程参数仍可修改。
-        </p>
-      )}
       {options && (
         <div className="simulation-settings">
           <div className="simulation-setting-fields">
@@ -312,7 +305,6 @@ export default function ParameterTuning() {
               <input
                 value={duration}
                 readOnly={rainLocked}
-                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min={options.duration_min_seconds}
                 max={options.duration_max_seconds}
@@ -361,7 +353,6 @@ export default function ParameterTuning() {
               <input
                 value={rainStart}
                 readOnly={rainLocked}
-                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min="0"
                 max={duration}
@@ -377,17 +368,13 @@ export default function ParameterTuning() {
               <input
                 value={rainDuration}
                 readOnly={rainLocked}
-                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min="0"
                 max={Math.max(0, duration - rainStart)}
                 step={rainOptions.time_step_seconds}
                 onChange={(event) => setRainDuration(Number(event.target.value))}
               />
-              <small>
-                {time(rainDuration)}
-                {rainLocked ? ' · 资料覆盖时长，包含无雨时段' : ''}
-              </small>
+              <small>{time(rainDuration)}</small>
             </label>
             <label>
               <span>
@@ -396,7 +383,6 @@ export default function ParameterTuning() {
               <input
                 value={rainfall}
                 readOnly={rainLocked}
-                aria-describedby={rainLocked ? 'rainfall-lock-note' : undefined}
                 type="number"
                 min="0"
                 step="0.1"
