@@ -43,17 +43,21 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 
 用户可在浏览器中选择研究区，并基于任一版本生成调参后的新版本。
 
-前端显示研究区中文名：JJ 为金江，LC 为老城，接口和存储仍使用原代码。
-金江可选择模拟降雨或“真实降雨（20260913）”；老城仅支持模拟降雨。
-实测资料保存在 `PythonProject/resources/rainfall/jj/JJ_real_20260913_2d.inp`，
-采用 5 分钟累计雨量，覆盖 2026-09-13 00:00 至 2026-09-15 00:00，总雨量 226.2 mm。
-选择实测事件后，模拟时长固定为 48 小时，降雨开始、降雨时长及总雨量只读，
-工程参数和输出步长仍可调整。降雨时长表示资料覆盖范围，包含无雨时段。
-降雨方案位于研究区选择下方。切换方案会直接加载对应的完整 INP，可以立即运行，
-不会产生待保存参数，也不会在每次切换时创建版本。后端启动时会幂等登记真实降雨的
-独立原始输入（同一金江研究区下的另一个版本根），旧版本与历史结果保持不变，无需数据库迁移。
-只有调整工程参数、输出步长或模拟降雨参数才需要保存派生版本；派生版本继承当前输入方案。
-两个方案分别恢复已选择的版本和结果。仅调整工程参数或输出步长不会重新生成实测降雨序列。
+前端显示研究区中文名：JJ 为金江，LC 为老城。每个研究区只有一个初始基线 V1，
+降雨条件作为当前版本的可编辑参数保存，不再通过第二份完整 INP 切换版本根。
+
+降雨设置支持芝加哥雨型、金江内置真实降雨事件、自定义固定间隔序列（粘贴 / CSV 导入）。
+三种来源统一转换为分段雨量（mm）并替换目标降雨时间序列，保存后生成派生版本。
+修改降雨保留父版本工程参数；仅修改工程参数或输出步长完整继承原降雨，不重新生成序列。
+
+实测事件资料为 `PythonProject/resources/rainfall/jj/JJ_real_20260913_2d.json`，
+从原始累计记录提取 576 个 5 分钟分段雨量，覆盖 48 小时，总雨量 226.2 mm。
+原始 INP 留作历史核对，不再用于登记基线。事件日期用于说明，雨量按相对时间应用到当前模型。
+选择事件不会修改模型开始日期、模拟时长或输出步长；用户需在原控件中设置足以覆盖序列的模拟时长。
+
+自定义序列每行一个雨量值，也支持 `offset_seconds,rainfall_mm` 两列格式，时间从 0 按间隔连续排列。
+间隔和开始偏移以整数秒填写；总雨量、覆盖时长和峰值由序列计算；允许全零降雨。
+格式、接口示例、升级及验收步骤见 [降雨序列说明](PythonProject/docs/rainfall-sequences.md)。
 
 模拟降雨的时长上限也扩展到 172800 秒（48 小时）。已有部署需将 `.env.production`
 中的 `SIMULATION_DURATION_MAX_SECONDS` 更新为 `172800` 并重建/重启服务；
@@ -63,7 +67,7 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 
 每次运行都会生成独立的数据库记录和 `runs/{run_id}` MinIO 对象，不覆盖物理历史。用户侧按版本查看结果：`GET /api/model-results` 对每个版本只返回最新一次成功运行，地图和弹窗分别通过 `/api/model-versions/{version_id}/latest-result/layers` 与 `/latest-result/timeseries` 查询同一份有效结果。失败运行不会替换该版本上一次成功结果。
 
-前端会在浏览器中保存当前研究区、降雨方案、各方案的当前版本与活动结果、图层顺序和显隐状态，刷新后自动恢复。点击“恢复初始状态”只会回到当前方案的原始输入、清除当前 RUN 图层并恢复默认图层顺序，不会删除数据库版本、运行记录或 MinIO 文件。
+前端会在浏览器中按研究区保存当前版本与活动结果，以及图层顺序和显隐状态，刷新后自动恢复。旧版按降雨方案保存的选择会自动迁移。点击“恢复初始状态”返回当前研究区唯一 V1、清除当前 RUN 图层并恢复默认图层顺序，不会删除数据库版本、运行记录或 MinIO 文件。
 
 ## 安全调参流程
 
@@ -74,7 +78,7 @@ SWMM 执行期间允许使用 `.runtime/` 临时目录，运行结束后的 INP�
 研究区入口位于 `/api/models`，版本操作位于
 `/api/model-versions/{version_id}`。`POST /api/models` 不存在；用户调参时会基于当前版本生成新的派生版本，原始 V1 不会被覆盖。每次成功运行会生成 `rate_<研究区>_without_sub.json`，可通过 `/api/runs/{run_id}/lisflood-input` 获取；同时将 `.rpt` 的 `Runoff Quantity Continuity → Final Storage` 雨深按“SWMM 汇水面积 / 对应 LISFLOOD 二维域面积”缩放后、以 INP 模拟时长为历时生成 `chi_<研究区>.txt`，可通过 `/api/runs/{run_id}/lisflood-virtual-rainfall` 获取。两份数据共同构成方案三输入，点源 JSON 不含汇水区滞蓄，虚拟降雨代表该部分水量。
 
-LISFLOOD 对接方可先调用 `GET /api/study-areas/latest-model-versions` 获取 LC、JJ 模拟降雨方案的当前 `version_id`；添加 `?rainfall_mode=real` 则获取金江真实降雨方案的当前版本。再分别调用 `/api/model-versions/{version_id}/latest-result/lisflood-input` 与 `/api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall` 下载点源输入和虚拟降雨。
+LISFLOOD 对接方可先调用 `GET /api/study-areas/latest-model-versions` 获取 LC、JJ 模拟降雨方案的当前 `version_id`；添加 `?rainfall_mode=real` 获取真实降雨版本，`?rainfall_mode=custom` 获取自定义降雨版本，`?rainfall_mode=all` 获取不区分降雨来源的最新版本。再分别调用 `/api/model-versions/{version_id}/latest-result/lisflood-input` 与 `/api/model-versions/{version_id}/latest-result/lisflood-virtual-rainfall` 下载点源输入和虚拟降雨。
 
 ## 前端开发
 

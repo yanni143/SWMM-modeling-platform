@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import '@/assets/css/ParameterTuning.css';
 import type { EditableField, ModelVersion } from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
+import RainfallEditor, { type RainfallDraft } from './RainfallEditor';
 
 interface Draft {
   key: string;
@@ -13,10 +14,6 @@ interface Draft {
   oldValue: string;
   newValue: string;
 }
-const time = (value: number) => {
-  const seconds = Math.max(0, Math.round(value));
-  return `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-};
 const parseDate = (value: string) =>
   new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
 
@@ -37,9 +34,12 @@ export default function ParameterTuning() {
   const [batchAmount, setBatchAmount] = useState('');
   const [duration, setDuration] = useState(store.simulationOptions?.duration_seconds ?? 0);
   const [reportStep, setReportStep] = useState(store.simulationOptions?.report_step_seconds ?? 0);
-  const [rainStart, setRainStart] = useState(store.rainfallOptions?.start_seconds ?? 0);
-  const [rainDuration, setRainDuration] = useState(store.rainfallOptions?.duration_seconds ?? 0);
-  const [rainfall, setRainfall] = useState(store.rainfallOptions?.total_rainfall_mm ?? 0);
+  const [rainDraft, setRainDraft] = useState<RainfallDraft>({
+    changed: false,
+    error: '',
+    description: '',
+  });
+  const [rainResetToken, setRainResetToken] = useState(0);
   const group = groups.find((item) => item.id === groupId);
   const objects = group?.objects ?? [];
   const filtered = objects.filter((item) =>
@@ -55,17 +55,10 @@ export default function ParameterTuning() {
   const draftsList = Object.values(drafts);
   const options = store.simulationOptions;
   const rainOptions = store.rainfallOptions;
-  const realEvent = rainOptions?.real_event;
-  const rainLocked = rainOptions?.read_only ?? false;
   const startDatetime = options?.start_datetime;
   const durationChanged = duration !== options?.duration_seconds;
   const stepChanged = reportStep !== options?.report_step_seconds;
-  const rainChanged =
-    !!rainOptions &&
-    !rainLocked &&
-    (rainStart !== rainOptions.start_seconds ||
-      rainDuration !== rainOptions.duration_seconds ||
-      rainfall !== rainOptions.total_rainfall_mm);
+  const rainChanged = rainDraft.changed;
   const minStep = Math.max(
     options?.report_step_min_seconds ?? 1,
     Math.ceil(options?.routing_step_seconds ?? 0),
@@ -91,31 +84,17 @@ export default function ParameterTuning() {
                 : outputSteps > options.max_output_steps
                   ? `输出时间点不能超过 ${options.max_output_steps} 个`
                   : '';
-  const rainError = !rainOptions
-    ? ''
-    : !Number.isInteger(rainStart) || !Number.isInteger(rainDuration)
-      ? '降雨开始时间和时长必须是整数秒'
-      : rainStart < 0 || rainDuration <= 0
-        ? '降雨开始时间必须不小于 0，降雨时长必须大于 0'
-        : rainStart + rainDuration > duration
-          ? '降雨结束时间不能超过模拟时长'
-          : rainStart % rainOptions.time_step_seconds ||
-              rainDuration % rainOptions.time_step_seconds
-            ? `降雨开始时间和时长必须是 ${rainOptions.time_step_seconds} 秒的整数倍`
-            : !Number.isFinite(rainfall) || rainfall <= 0
-              ? '总降雨量必须是大于 0 的有效数值'
-              : '';
-  const error = localError || simulationError || rainError;
+  const error = localError || simulationError || rainDraft.error;
+  const hasPending = draftsList.length > 0 || durationChanged || stepChanged || rainChanged;
+  useEffect(() => {
+    store.setPendingChanges(hasPending);
+  }, [hasPending, store.setPendingChanges]);
+  useEffect(() => () => store.setPendingChanges(false), [store.setPendingChanges]);
   const nextVersion = Math.max(...store.allVersions.map((item) => item.version), 0) + 1;
   useEffect(() => {
     setDuration(options?.duration_seconds ?? 0);
     setReportStep(options?.report_step_seconds ?? 0);
   }, [options]);
-  useEffect(() => {
-    setRainStart(rainOptions?.start_seconds ?? 0);
-    setRainDuration(rainOptions?.duration_seconds ?? 0);
-    setRainfall(rainOptions?.total_rainfall_mm ?? 0);
-  }, [rainOptions]);
   useEffect(() => {
     if (!groups.some((item) => item.id === groupId)) {
       setGroupId(groups[0]?.id ?? '');
@@ -163,9 +142,7 @@ export default function ParameterTuning() {
     setLocalError('');
     setDuration(options?.duration_seconds ?? 0);
     setReportStep(options?.report_step_seconds ?? 0);
-    setRainStart(rainOptions?.start_seconds ?? 0);
-    setRainDuration(rainOptions?.duration_seconds ?? 0);
-    setRainfall(rainOptions?.total_rainfall_mm ?? 0);
+    setRainResetToken((token) => token + 1);
   };
   const stage = (field: EditableField, raw: string) => {
     const numeric = Number(raw);
@@ -252,14 +229,7 @@ export default function ParameterTuning() {
       durationChanged || stepChanged
         ? { duration_seconds: duration, report_step_seconds: reportStep }
         : undefined,
-      rainChanged
-        ? {
-            mode: 'design',
-            start_seconds: rainStart,
-            duration_seconds: rainDuration,
-            total_rainfall_mm: rainfall,
-          }
-        : undefined,
+      rainDraft.input,
     );
     if (result) {
       setCreated(result.version);
@@ -304,7 +274,6 @@ export default function ParameterTuning() {
               </span>
               <input
                 value={duration}
-                readOnly={rainLocked}
                 type="number"
                 min={options.duration_min_seconds}
                 max={options.duration_max_seconds}
@@ -312,9 +281,7 @@ export default function ParameterTuning() {
                 onChange={(event) => setDuration(Number(event.target.value))}
               />
               <small>
-                {rainLocked
-                  ? '固定 172800 秒（48 小时）'
-                  : `${options.duration_min_seconds}～${options.duration_max_seconds} 秒（最长 48 小时）`}
+                {`${options.duration_min_seconds}～${options.duration_max_seconds} 秒（最长 48 小时）`}
               </small>
             </label>
             <label>
@@ -344,68 +311,13 @@ export default function ParameterTuning() {
         </div>
       )}
       {rainOptions && (
-        <div className="rainfall-settings">
-          <div className="rainfall-setting-fields">
-            <label>
-              <span>
-                降雨开始 <small>秒</small>
-              </span>
-              <input
-                value={rainStart}
-                readOnly={rainLocked}
-                type="number"
-                min="0"
-                max={duration}
-                step={rainOptions.time_step_seconds}
-                onChange={(event) => setRainStart(Number(event.target.value))}
-              />
-              <small>{time(rainStart)}</small>
-            </label>
-            <label>
-              <span>
-                降雨时长 <small>秒</small>
-              </span>
-              <input
-                value={rainDuration}
-                readOnly={rainLocked}
-                type="number"
-                min="0"
-                max={Math.max(0, duration - rainStart)}
-                step={rainOptions.time_step_seconds}
-                onChange={(event) => setRainDuration(Number(event.target.value))}
-              />
-              <small>{time(rainDuration)}</small>
-            </label>
-            <label>
-              <span>
-                总降雨量 <small>mm</small>
-              </span>
-              <input
-                value={rainfall}
-                readOnly={rainLocked}
-                type="number"
-                min="0"
-                step="0.1"
-                onChange={(event) => setRainfall(Number(event.target.value))}
-              />
-              <small>
-                当前峰值{' '}
-                {(rainLocked && realEvent
-                  ? realEvent.peak_rainfall_mm_h
-                  : rainOptions.peak_rainfall_mm_h
-                ).toFixed(2)}{' '}
-                mm/h
-              </small>
-            </label>
-            <div className="rainfall-derived">
-              <span>降雨结束</span>
-              <strong>{time(rainStart + rainDuration)}</strong>
-              <small>
-                {rainLocked ? '5 分钟实测累计雨量' : `峰现系数 ${rainOptions.peak_ratio}`}
-              </small>
-            </div>
-          </div>
-        </div>
+        <RainfallEditor
+          current={rainOptions}
+          duration={duration}
+          studyArea={store.models.find((model) => model.id === store.selectedModelId)?.name ?? 'JJ'}
+          resetToken={rainResetToken}
+          onChange={setRainDraft}
+        />
       )}
       <div className="engineering-heading tuning-heading">
         <div>
@@ -616,14 +528,10 @@ export default function ParameterTuning() {
           )}
           {rainChanged && (
             <Change
-              label="模拟降雨"
-              oldValue={`${time(rainOptions!.start_seconds)}–${time(rainOptions!.start_seconds + rainOptions!.duration_seconds)} · ${rainOptions!.total_rainfall_mm} mm`}
-              newValue={`${time(rainStart)}–${time(rainStart + rainDuration)} · ${rainfall} mm`}
-              onRemove={() => {
-                setRainStart(rainOptions!.start_seconds);
-                setRainDuration(rainOptions!.duration_seconds);
-                setRainfall(rainOptions!.total_rainfall_mm);
-              }}
+              label="降雨条件"
+              oldValue={`${rainOptions!.duration_seconds} 秒 · ${rainOptions!.total_rainfall_mm.toFixed(2)} mm`}
+              newValue={rainDraft.description}
+              onRemove={() => setRainResetToken((token) => token + 1)}
             />
           )}
           {draftsList.map((draft) => (
@@ -662,7 +570,11 @@ export default function ParameterTuning() {
           <div>
             <strong>新版本 V{created.version} 已生成</strong>
           </div>
-          <button type="button" disabled={store.running} onClick={() => void runCreated()}>
+          <button
+            type="button"
+            disabled={store.running || hasPending}
+            onClick={() => void runCreated()}
+          >
             {store.running ? '正在运行…' : `运行 V${created.version}`}
           </button>
         </div>

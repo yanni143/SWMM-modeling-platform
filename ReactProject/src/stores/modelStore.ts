@@ -13,7 +13,6 @@ import {
   type ModelSummary,
   type ModelVersion,
   type ParameterChangeInput,
-  type RainfallMode,
   type RainfallOptions,
   type RainfallOptionsInput,
   type SectionDetail,
@@ -33,7 +32,6 @@ interface ModelState {
   allVersions: ModelVersion[];
   versions: ModelVersion[];
   selectedVersionId: string | null;
-  rainfallMode: RainfallMode;
   sections: SectionSummary[];
   selectedSectionName: string | null;
   sectionDetail: SectionDetail | null;
@@ -46,9 +44,10 @@ interface ModelState {
   availableResults: ModelResultSummary[];
   activeResultVersionId: string | null;
   error: string | null;
+  hasPendingChanges: boolean;
+  setPendingChanges: (pending: boolean) => void;
   loadModels: (selectInitialModel?: boolean) => Promise<void>;
   selectModel: (id: string) => Promise<void>;
-  selectRainfallInput: (mode: RainfallMode) => Promise<void>;
   selectVersion: (id: string) => Promise<void>;
   selectSection: (name: string) => Promise<void>;
   runSelectedVersion: () => Promise<Awaited<ReturnType<typeof runProjectVersion>> | null>;
@@ -65,17 +64,12 @@ interface ModelState {
 
 const errorText = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
-const versionMode = (version: ModelVersion): RainfallMode =>
-  version.rainfall_mode ?? (version.change_summary?.rainfall_mode === 'real' ? 'real' : 'design');
-const inputKey = (modelId: string | null, mode: RainfallMode) => `${modelId}:${mode}`;
-
 export const useModelStore = create<ModelState>((set, get) => ({
   models: [],
   selectedModelId: null,
   allVersions: [],
   versions: [],
   selectedVersionId: null,
-  rainfallMode: 'design',
   sections: [],
   selectedSectionName: null,
   sectionDetail: null,
@@ -88,6 +82,8 @@ export const useModelStore = create<ModelState>((set, get) => ({
   availableResults: [],
   activeResultVersionId: null,
   error: null,
+  hasPendingChanges: false,
+  setPendingChanges: (pending) => set({ hasPendingChanges: pending }),
   async loadModels(selectInitialModel = true) {
     set({ loading: true, error: null });
     try {
@@ -107,6 +103,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
     saveWorkspaceState({ selectedModelId: modelId });
     set({
       selectedModelId: modelId,
+      hasPendingChanges: false,
       selectedVersionId: null,
       allVersions: [],
       versions: [],
@@ -123,61 +120,29 @@ export const useModelStore = create<ModelState>((set, get) => ({
     try {
       const allVersions = await fetchVersions(modelId);
       if (get().selectedModelId !== modelId) return;
-      set({ allVersions });
-      const model = get().models.find((item) => item.id === modelId);
-      const saved = loadWorkspaceState().rainfallModes?.[modelId] ?? 'design';
-      const mode = model?.rainfall_inputs.some((input) => input.mode === saved) ? saved : 'design';
-      await get().selectRainfallInput(mode);
+      set({ allVersions, versions: allVersions });
+      const saved = loadWorkspaceState();
+      const baseline = get().models.find((item) => item.id === modelId)?.baseline_version_id;
+      const savedVersion = saved.selectedVersionsByModel?.[modelId];
+      const initial =
+        allVersions.find((item) => item.id === savedVersion) ??
+        allVersions.find((item) => item.id === baseline) ??
+        allVersions.find((item) => item.version === 1);
+      if (!initial) throw new Error('研究区初始版本尚未初始化');
+      await get().selectVersion(initial.id);
+      if (get().selectedModelId === modelId) await get().loadModelResults();
     } catch (error) {
       if (get().selectedModelId === modelId) set({ error: errorText(error, '工程版本加载失败') });
     } finally {
       if (get().selectedModelId === modelId) set({ loading: false });
     }
   },
-  async selectRainfallInput(mode) {
-    const modelId = get().selectedModelId;
-    const model = get().models.find((item) => item.id === modelId);
-    const input = model?.rainfall_inputs.find((item) => item.mode === mode);
-    if (!modelId || !input) return;
-    const versions = get().allVersions.filter((version) => versionMode(version) === mode);
-    const scope = inputKey(modelId, mode);
-    const saved = loadWorkspaceState();
-    saveWorkspaceState({ rainfallModes: { ...saved.rainfallModes, [modelId]: mode } });
-    set({
-      rainfallMode: mode,
-      versions,
-      selectedVersionId: null,
-      sections: [],
-      sectionDetail: null,
-      parameterGroups: [],
-      simulationOptions: null,
-      rainfallOptions: null,
-      availableResults: [],
-      activeResultVersionId: null,
-      loading: true,
-      error: null,
-    });
-    try {
-      const savedVersion = saved.selectedVersionsByInput?.[scope] ?? saved.selectedVersionId;
-      const initial =
-        versions.find((item) => item.id === savedVersion) ??
-        versions.find((item) => item.id === input.baseline_version_id);
-      if (!initial) throw new Error('输入方案尚未初始化，请重启后端服务');
-      await get().selectVersion(initial.id);
-      if (get().selectedModelId !== modelId || get().rainfallMode !== mode) return;
-      await get().loadModelResults();
-    } catch (error) {
-      if (get().selectedModelId === modelId && get().rainfallMode === mode)
-        set({ error: errorText(error, '输入方案加载失败') });
-    } finally {
-      if (get().selectedModelId === modelId && get().rainfallMode === mode) set({ loading: false });
-    }
-  },
   async selectVersion(versionId) {
     if (!get().versions.some((version) => version.id === versionId)) return;
-    const scope = inputKey(get().selectedModelId, get().rainfallMode);
+    const scope = get().selectedModelId;
     set({
       selectedVersionId: versionId,
+      hasPendingChanges: false,
       selectedSectionName: null,
       sectionDetail: null,
       loading: true,
@@ -188,11 +153,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
         fetchSections(versionId),
         fetchEditableParameters(versionId),
       ]);
-      if (
-        get().selectedVersionId !== versionId ||
-        inputKey(get().selectedModelId, get().rainfallMode) !== scope
-      )
-        return;
+      if (get().selectedVersionId !== versionId || get().selectedModelId !== scope) return;
       set({
         sections,
         parameterGroups: editable.groups,
@@ -201,9 +162,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
       });
       saveWorkspaceState({
         selectedVersionId: versionId,
-        selectedVersionsByInput: {
-          ...loadWorkspaceState().selectedVersionsByInput,
-          [scope]: versionId,
+        selectedVersionsByModel: {
+          ...loadWorkspaceState().selectedVersionsByModel,
+          [scope!]: versionId,
         },
       });
     } catch (error) {
@@ -228,6 +189,10 @@ export const useModelStore = create<ModelState>((set, get) => ({
   async runSelectedVersion() {
     const version = get().versions.find((item) => item.id === get().selectedVersionId);
     if (!version) return null;
+    if (get().hasPendingChanges) {
+      set({ error: '请先保存或撤销当前修改，再运行版本' });
+      return null;
+    }
     set({ running: true, error: null });
     try {
       const result = await runProjectVersion(version.id);
@@ -243,14 +208,14 @@ export const useModelStore = create<ModelState>((set, get) => ({
   },
   async loadModelResults() {
     const modelId = get().selectedModelId;
-    const mode = get().rainfallMode;
-    const scope = inputKey(modelId, mode);
+    const scope = modelId;
+    if (!modelId) return;
     try {
       const results = await fetchModelResults(modelId ?? undefined);
-      if (get().selectedModelId !== modelId || get().rainfallMode !== mode) return;
+      if (get().selectedModelId !== modelId) return;
       const ids = new Set(get().versions.map((version) => version.id));
       const availableResults = results.filter((result) => ids.has(result.version_id));
-      const saved = loadWorkspaceState().activeResultsByInput?.[scope] ?? null;
+      const saved = loadWorkspaceState().activeResultsByModel?.[scope!] ?? null;
       set({
         availableResults,
         activeResultVersionId: availableResults.some((item) => item.version_id === saved)
@@ -258,38 +223,35 @@ export const useModelStore = create<ModelState>((set, get) => ({
           : null,
       });
     } catch (error) {
-      if (inputKey(get().selectedModelId, get().rainfallMode) === scope)
-        set({ error: errorText(error, '历史模拟结果加载失败') });
+      if (get().selectedModelId === scope) set({ error: errorText(error, '历史模拟结果加载失败') });
     }
   },
   activateResultVersion(versionId) {
     if (versionId && !get().availableResults.some((item) => item.version_id === versionId)) return;
-    const scope = inputKey(get().selectedModelId, get().rainfallMode);
+    const scope = get().selectedModelId;
     set({ activeResultVersionId: versionId });
     saveWorkspaceState({
       activeResultVersionId: versionId,
-      activeResultsByInput: { ...loadWorkspaceState().activeResultsByInput, [scope]: versionId },
+      activeResultsByModel: { ...loadWorkspaceState().activeResultsByModel, [scope!]: versionId },
     });
   },
   async restoreInitialState() {
-    const { selectedModelId, rainfallMode } = get();
-    const input = get()
-      .models.find((model) => model.id === selectedModelId)
-      ?.rainfall_inputs.find((item) => item.mode === rainfallMode);
+    const { selectedModelId } = get();
+    const baseline =
+      get().models.find((model) => model.id === selectedModelId)?.baseline_version_id ??
+      get().versions.find((version) => version.version === 1)?.id;
     const saved = loadWorkspaceState();
-    const scope = inputKey(selectedModelId, rainfallMode);
     clearWorkspaceState();
     saveWorkspaceState({
       selectedModelId: selectedModelId ?? undefined,
-      rainfallModes: saved.rainfallModes,
-      selectedVersionsByInput: saved.selectedVersionsByInput,
-      activeResultsByInput: { ...saved.activeResultsByInput, [scope]: null },
+      selectedVersionsByModel: saved.selectedVersionsByModel,
+      activeResultsByModel: { ...saved.activeResultsByModel, [selectedModelId!]: null },
     });
-    set({ activeResultVersionId: null });
-    if (input) await get().selectVersion(input.baseline_version_id);
+    set({ activeResultVersionId: null, hasPendingChanges: false });
+    if (baseline) await get().selectVersion(baseline);
   },
   async saveAdjustedVersion(changes, summary, simulation, rainfall) {
-    const { selectedVersionId, selectedModelId, rainfallMode } = get();
+    const { selectedVersionId, selectedModelId } = get();
     if (!selectedVersionId || !selectedModelId) return null;
     set({ savingVersion: true, error: null });
     try {
@@ -303,7 +265,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
       const allVersions = await fetchVersions(selectedModelId);
       set({
         allVersions,
-        versions: allVersions.filter((version) => versionMode(version) === rainfallMode),
+        versions: allVersions,
       });
       await get().selectVersion(result.version.id);
       await get().loadModels(false);

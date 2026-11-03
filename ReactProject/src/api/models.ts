@@ -13,6 +13,7 @@ export interface ModelSummary extends ModelInfo {
   version_count: number;
   latest_version: number | null;
   rainfall_inputs: RainfallInput[];
+  baseline_version_id: string;
 }
 
 export interface RainfallInput {
@@ -155,7 +156,7 @@ export interface SimulationOptions {
   require_report_step_divisible: boolean;
 }
 
-export type RainfallMode = 'design' | 'real';
+export type RainfallMode = 'design' | 'real' | 'custom';
 
 export interface RealRainfallEvent {
   event_id: string;
@@ -169,6 +170,7 @@ export interface RealRainfallEvent {
   total_rainfall_mm: number;
   peak_rainfall_mm_h: number;
   time_step_seconds: number;
+  values_mm: number[];
 }
 
 export interface RainfallOptions {
@@ -186,6 +188,8 @@ export interface RainfallOptions {
   event_id: string | null;
   read_only: boolean;
   real_event: RealRainfallEvent | null;
+  values_mm: number[];
+  series_checksum: string;
 }
 
 export interface EditableParametersResponse {
@@ -203,13 +207,53 @@ export type RainfallOptionsInput =
   | {
       mode: 'real';
       event_id: string;
+      start_seconds?: number;
     }
   | {
       mode?: 'design';
       start_seconds: number;
       duration_seconds: number;
       total_rainfall_mm: number;
+    }
+  | {
+      mode: 'custom';
+      start_seconds: number;
+      time_step_seconds: number;
+      values_mm: number[];
     };
+
+export interface RainfallPreview {
+  mode: RainfallMode;
+  event_id: string | null;
+  start_seconds: number;
+  duration_seconds: number;
+  end_seconds: number;
+  time_step_seconds: number;
+  values_mm: number[];
+  total_rainfall_mm: number;
+  peak_rainfall_mm_h: number;
+  series_checksum: string;
+}
+
+export function previewRainfall(
+  studyArea: string,
+  duration: number,
+  rainfall: RainfallOptionsInput,
+): Promise<RainfallPreview> {
+  return request('/api/rainfall/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      study_area: studyArea,
+      simulation_duration_seconds: duration,
+      rainfall_options: rainfall,
+    }),
+  });
+}
+
+export function fetchRainfallEvents(studyArea: string): Promise<RealRainfallEvent[]> {
+  return request(`/api/rainfall-events?study_area=${encodeURIComponent(studyArea)}`);
+}
 
 export interface ParameterChangeInput {
   section: string;
@@ -227,7 +271,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, options);
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw new Error(payload?.detail || `请求失败（HTTP ${response.status}）`);
+    const detail = payload?.detail;
+    throw new Error(
+      Array.isArray(detail)
+        ? detail.map((item: { msg: string }) => item.msg).join('；')
+        : detail || `请求失败（HTTP ${response.status}）`,
+    );
   }
   return response.json() as Promise<T>;
 }

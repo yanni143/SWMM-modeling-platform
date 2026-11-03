@@ -12,8 +12,6 @@ from config import get_settings
 from models.domain import ModelParameterChange, ModelVersion, SwmmModel
 from storage.artifact_storage import ArtifactStorageService
 from study_areas import (
-    JJ_REAL_INPUT_PATH,
-    JJ_REAL_VERSION_ID,
     STUDY_AREA_SEEDS,
     StudyAreaSeed,
     rainfall_inputs,
@@ -51,58 +49,8 @@ class ModelService:
     def ensure_study_areas(
         self, session: Session
     ) -> list[tuple[SwmmModel, ModelVersion, InpValidationResult]]:
-        """Register study areas and both JJ input roots exactly once."""
-        seeded = [self._ensure_seed(session, seed) for seed in STUDY_AREA_SEEDS]
-        self._ensure_real_input(session)
-        return seeded
-
-    def _ensure_real_input(self, session: Session) -> ModelVersion:
-        seed = next(seed for seed in STUDY_AREA_SEEDS if seed.name == "JJ")
-        model = session.get(SwmmModel, seed.model_id, with_for_update=True)
-        if not model:
-            raise ModelNotFoundError("金江研究区不存在")
-        existing = session.get(ModelVersion, JJ_REAL_VERSION_ID)
-        if existing:
-            if existing.model_id != model.id or existing.rainfall_mode != "real":
-                raise RuntimeError("金江真实降雨输入记录不一致")
-            session.commit()
-            return existing
-        validation = validate_inp_file(JJ_REAL_INPUT_PATH)
-        latest = (
-            session.scalar(
-                select(func.max(ModelVersion.version)).where(ModelVersion.model_id == model.id)
-            )
-            or 0
-        )
-        # Store the full supplied INP unchanged, without user parameter changes.
-        stored = self.storage.upload_model_version(JJ_REAL_INPUT_PATH, model.id, JJ_REAL_VERSION_ID)
-        version = ModelVersion(
-            id=JJ_REAL_VERSION_ID,
-            model_id=model.id,
-            parent_version_id=None,
-            version=latest + 1,
-            inp_bucket=stored.bucket,
-            inp_object_key=stored.object_key,
-            checksum=stored.checksum,
-            size_bytes=stored.size_bytes,
-            change_summary={
-                "source": "system_rainfall_input",
-                "rainfall_mode": "real",
-                "rainfall_event_id": "jj_real_20260913_2d",
-                "original_filename": JJ_REAL_INPUT_PATH.name,
-                "section_count": len(validation.sections),
-            },
-            created_by="system",
-        )
-        try:
-            session.add(version)
-            session.commit()
-            session.refresh(version)
-        except Exception:
-            session.rollback()
-            self._delete_uploaded_object(stored.object_key)
-            raise
-        return version
+        """Register one immutable baseline per study area; preserve all historical versions."""
+        return [self._ensure_seed(session, seed) for seed in STUDY_AREA_SEEDS]
 
     def _ensure_seed(
         self, session: Session, seed: StudyAreaSeed
@@ -185,6 +133,9 @@ class ModelService:
                 "version_count": count,
                 "latest_version": latest,
                 "rainfall_inputs": rainfall_inputs(model.id),
+                "baseline_version_id": next(
+                    seed.version_id for seed in STUDY_AREA_SEEDS if seed.model_id == model.id
+                ),
             }
             for model, count, latest in rows
         ]
@@ -204,8 +155,10 @@ class ModelService:
             )
             .where(ModelVersion.model_id.in_(self.study_area_model_ids))
             .where(
-                func.coalesce(ModelVersion.change_summary["rainfall_mode"].as_string(), "design")
-                == rainfall_mode
+                (
+                    func.coalesce(ModelVersion.change_summary["rainfall_mode"].as_string(), "design")
+                    == rainfall_mode
+                ) if rainfall_mode != "all" else True
             )
             .group_by(ModelVersion.model_id)
             .subquery()
@@ -376,6 +329,7 @@ class ModelService:
                     "change_count": len(applied),
                     "rainfall_mode": final_rainfall["mode"],
                     "rainfall_event_id": final_rainfall["event_id"],
+                    "rainfall_series_checksum": final_rainfall["series_checksum"],
                 },
                 created_by=created_by,
             )
