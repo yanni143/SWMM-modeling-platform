@@ -41,7 +41,7 @@ STUDY_AREA_SEEDS: tuple[StudyAreaSeed, ...] = (
     ),
 )
 
-# A second immutable input root for JJ, sharing its study area but not its INP.
+# Legacy IDs and input are retained only for historical compatibility. No second root is seeded.
 JJ_REAL_VERSION_ID = UUID("20000000-0000-0000-0000-000000000102")
 JJ_REAL_INPUT_PATH = _RESOURCE_DIR.parent / "rainfall" / "jj" / "JJ_real_20260913_2d.inp"
 
@@ -56,13 +56,4 @@ def rainfall_inputs(model_id: UUID) -> list[dict]:
             "filename": seed.inp_path.name,
         }
     ]
-    if seed.name == "JJ":
-        inputs.append(
-            {
-                "mode": "real",
-                "label": "真实降雨（20260913）",
-                "baseline_version_id": JJ_REAL_VERSION_ID,
-                "filename": JJ_REAL_INPUT_PATH.name,
-            }
-        )
     return inputs

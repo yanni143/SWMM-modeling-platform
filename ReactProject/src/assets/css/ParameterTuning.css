@@ -22,7 +22,7 @@
 .rainfall-heading { margin-top: 10px; }
 .rainfall-setting-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(16,42,55,.1); }
 .rainfall-setting-fields label { display: grid; gap: 5px; padding: 10px; background: rgba(255,255,255,.74); }
-.rainfall-setting-fields label:last-child { grid-column: 1 / -1; }
+
 .rainfall-setting-fields label > span { font-size: 12px; font-weight: 650; }
 .rainfall-setting-fields label > span small { color: #23748c; font-weight: 400; }
 .rainfall-setting-fields label > small { color: #78888d; font-size: 10px; }
@@ -98,3 +98,101 @@
 .version-created span { color: #c7dfd6; font-size: 9px; }
 .version-created button { padding: 9px 10px; color: #285d50; border: 0; background: white; font: 650 10px inherit; cursor: pointer; }
 @media (max-width: 760px) { .field-grid, .simulation-setting-fields, .rainfall-setting-fields { grid-template-columns: 1fr; } .rainfall-setting-fields label:last-child { grid-column: auto; } .simulation-projection { grid-template-columns: auto 1fr; } .simulation-projection em { grid-column: 1 / -1; } }
+
+.rainfall-editor-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 10px;
+}
+.rainfall-editor-title h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.rainfall-editor-title > span,
+.rainfall-sequence small,
+.rainfall-preview small {
+  font-size: 11px;
+  color: #53676e;
+}
+.rainfall-setting-fields label.rainfall-full {
+  grid-column: 1 / -1;
+}
+.rainfall-sequence {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.74);
+}
+.rainfall-sequence > label {
+  font-size: 12px;
+  font-weight: 650;
+}
+.rainfall-sequence textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 180px;
+  max-height: 400px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid #b9c7c7;
+  background: #fff;
+  color: #102a37;
+  font:
+    12px/1.6 Consolas,
+    monospace;
+}
+.rainfall-sequence textarea:focus {
+  outline: 2px solid #23748c;
+  outline-offset: 1px;
+}
+.rainfall-import {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+}
+.rainfall-import label {
+  display: grid;
+  gap: 6px;
+}
+.rainfall-import input {
+  max-width: 100%;
+  font-size: 12px;
+}
+.rainfall-import a {
+  color: #23748c;
+}
+.rainfall-preview {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-top: 1px solid #cbd6d6;
+  background: rgba(255, 255, 255, 0.74);
+}
+.rainfall-preview > div {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}
+.rainfall-preview svg {
+  width: 100%;
+  height: 100px;
+}
+.rainfall-preview rect {
+  fill: #23748c;
+}
+.rainfall-preview line {
+  stroke: #b9c7c7;
+}
+.rainfall-preview strong {
+  color: #102a37;
+  font:
+    13px Consolas,
+    monospace;
+}
+.rainfall-preview > .rainfall-time-axis { justify-content: space-between; }

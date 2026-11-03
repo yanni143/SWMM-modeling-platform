@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import '@/assets/css/ModelWorkspace.css';
 import { latestLisfloodInputUrl, latestLisfloodVirtualRainfallUrl } from '@/api/models';
-import type { RainfallMode } from '@/api/models';
 import { useModelStore } from '@/stores/modelStore';
 import { studyAreaName } from '@/utils/studyAreas';
 import ParameterTuning from './ParameterTuning';
@@ -77,31 +76,6 @@ export default function ModelWorkspace() {
               </select>
             </label>
           )}
-          {selected.rainfall_inputs.length > 0 && (
-            <label className="study-area-picker">
-              <span>降雨方案</span>
-              <select
-                className="ledger-select"
-                aria-label="选择降雨方案"
-                value={store.rainfallMode}
-                disabled={
-                  store.running ||
-                  store.savingVersion ||
-                  store.loading ||
-                  selected.rainfall_inputs.length < 2
-                }
-                onChange={(event) =>
-                  void store.selectRainfallInput(event.target.value as RainfallMode)
-                }
-              >
-                {selected.rainfall_inputs.map((item) => (
-                  <option key={item.mode} value={item.mode}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           <div className="model-facts">
             <div>
               <span>状态</span>
@@ -133,7 +107,13 @@ export default function ModelWorkspace() {
           >
             {store.versions.map((version) => (
               <option key={version.id} value={version.id}>
-                V{version.version} · {formatBytes(version.size_bytes)}
+                V{version.version} ·{' '}
+                {
+                  { design: '模拟降雨', real: '真实降雨', custom: '自定义降雨' }[
+                    version.rainfall_mode ?? 'design'
+                  ]
+                }{' '}
+                · {formatBytes(version.size_bytes)}
               </option>
             ))}
           </select>
@@ -141,8 +121,13 @@ export default function ModelWorkspace() {
             className="run-action"
             type="button"
             disabled={
-              store.running || store.savingVersion || store.loading || !store.selectedVersionId
+              store.running ||
+              store.savingVersion ||
+              store.loading ||
+              store.hasPendingChanges ||
+              !store.selectedVersionId
             }
+            title={store.hasPendingChanges ? '请先保存或撤销当前修改' : undefined}
             onClick={run}
           >
             {store.running ? '正在运行并解析结果…' : '运行当前版本'}

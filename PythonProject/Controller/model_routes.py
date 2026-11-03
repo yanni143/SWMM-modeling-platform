@@ -7,6 +7,7 @@ from minio.error import S3Error
 from sqlalchemy.orm import Session
 from urllib3.exceptions import HTTPError as Urllib3HTTPError
 
+from config import get_settings
 from database.session import get_db
 from schemas.model import (
     ModelListItem,
@@ -25,12 +26,36 @@ from schemas.parameter import (
     EditableGroup,
     ParameterCatalogResponse,
     RainfallOptions,
+    RainfallPreview,
+    RainfallPreviewRequest,
+    RealRainfallEvent,
     SimulationOptions,
 )
 from Service.ModelService import ModelNotFoundError, ModelService, SectionNotFoundError
 from Tools.InpTools.InpValidator import InvalidInpFile
+from Tools.InpTools.RainfallScenario import prepare_rainfall, real_event
 
 router = APIRouter(prefix="/api", tags=["projects"])
+
+
+@router.get("/rainfall-events", response_model=list[RealRainfallEvent])
+def list_rainfall_events(study_area: Literal["LC", "JJ"]) -> list[dict]:
+    return [real_event()] if study_area == "JJ" else []
+
+
+@router.post("/rainfall/preview", response_model=RainfallPreview)
+def preview_rainfall(payload: RainfallPreviewRequest) -> dict:
+    try:
+        settings = get_settings()
+        if not (settings.simulation_duration_min_seconds <= payload.simulation_duration_seconds
+                <= settings.simulation_duration_max_seconds):
+            raise ValueError("模拟时长超出允许范围")
+        return prepare_rainfall(
+            payload.rainfall_options.model_dump(exclude_none=True), payload.study_area,
+            payload.simulation_duration_seconds,
+        )
+    except Exception as exc:
+        raise translate_service_error(exc) from exc
 
 
 def translate_service_error(exc: Exception) -> HTTPException:
@@ -55,7 +80,7 @@ def list_models(session: Session = Depends(get_db)) -> list[dict]:
 )
 def list_latest_study_area_versions(
     session: Session = Depends(get_db),
-    rainfall_mode: Literal["design", "real"] = "design",
+    rainfall_mode: Literal["design", "real", "custom", "all"] = "design",
 ) -> list[StudyAreaLatestVersion]:
     """Return the latest version ID for each built-in study area (LC and JJ)."""
     try:

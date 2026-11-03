@@ -71,7 +71,8 @@ class ModelVersion(TimestampMixin, Base):
     @property
     def rainfall_mode(self) -> str:
         # Existing versions without a mode belong to the original design input.
-        return "real" if (self.change_summary or {}).get("rainfall_mode") == "real" else "design"
+        mode = (self.change_summary or {}).get("rainfall_mode", "design")
+        return mode if mode in {"design", "real", "custom"} else "design"
 
     model: Mapped[SwmmModel] = relationship(back_populates="versions")
     parent_version: Mapped[Optional["ModelVersion"]] = relationship(remote_side=[id])

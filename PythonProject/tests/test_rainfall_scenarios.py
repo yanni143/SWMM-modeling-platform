@@ -8,22 +8,21 @@ from config import Settings
 from models.domain import ModelVersion, SwmmModel
 from schemas.parameter import RainfallOptions, RainfallOptionsInput
 from Service.ModelService import ModelService
-from study_areas import JJ_REAL_INPUT_PATH, JJ_REAL_VERSION_ID, STUDY_AREA_SEEDS, rainfall_inputs
+from study_areas import JJ_REAL_INPUT_PATH, STUDY_AREA_SEEDS, rainfall_inputs
 from Tools.InpTools.InpParameterEditor import (
     ParameterValidationError,
     apply_parameter_changes,
-    apply_simulation_options,
     build_simulation_options,
 )
 from Tools.InpTools.InpParser import INPParser
-from Tools.InpTools.InpRainfallEditor import build_rainfall_options
 from Tools.InpTools.RainfallScenario import (
     EVENT_ID,
-    RESOURCE,
     apply_rainfall_scenario,
+    prepare_rainfall,
     rainfall_catalog,
     real_event,
 )
+from Tools.InpTools.RainfallSeries import read_series
 
 
 @pytest.fixture
@@ -48,153 +47,225 @@ def observed():
     return JJ_REAL_INPUT_PATH.read_text(encoding="utf-8")
 
 
-def test_event_statistics_use_cumulative_increments(settings):
-    event = real_event(settings)
+def test_event_is_interval_depth_data_identical_to_original(observed, settings):
+    event = real_event()
+    original = read_series(INPParser.parse(observed), 172800)
+    assert event["values_mm"] == pytest.approx(original["values_mm"], abs=1e-10)
+    assert len(event["values_mm"]) == 576
     assert event["total_rainfall_mm"] == 226.2
-    assert event["peak_rainfall_mm_h"] == pytest.approx(132.0)
-    assert event["simulation_duration_seconds"] == 172800
+    assert event["peak_rainfall_mm_h"] == pytest.approx(132)
     assert event["start_datetime"] == "2026-09-13T00:00:00"
-    assert event["end_datetime"] == "2026-09-15T00:00:00"
-    assert event["time_step_seconds"] == 300
-    original = Path(__file__).resolve().parents[2] / "realdata/JJ_real_20260913_2d.inp"
-    if original.exists():
-        assert RESOURCE.read_bytes() == original.read_bytes()
 
 
-def test_only_jinjiang_has_two_input_roots():
-    lc, jj = STUDY_AREA_SEEDS
-    assert [item["mode"] for item in rainfall_inputs(lc.model_id)] == ["design"]
-    inputs = rainfall_inputs(jj.model_id)
-    assert [item["mode"] for item in inputs] == ["design", "real"]
-    assert inputs[0]["baseline_version_id"] == jj.version_id
-    assert inputs[1]["baseline_version_id"] == JJ_REAL_VERSION_ID
-    assert inputs[1]["filename"] == JJ_REAL_INPUT_PATH.name
+def test_one_baseline_per_area_and_no_second_root_seed(settings):
+    for seed in STUDY_AREA_SEEDS:
+        inputs = rainfall_inputs(seed.model_id)
+        assert len(inputs) == 1
+        assert inputs[0]["baseline_version_id"] == seed.version_id
+    service = object.__new__(ModelService)
+    calls = []
+    service._ensure_seed = lambda session, seed: calls.append(seed.version_id)
+    service.ensure_study_areas(None)
+    assert calls == [seed.version_id for seed in STUDY_AREA_SEEDS]
 
 
-def test_raw_observed_input_is_read_only_without_rewriting_file(observed, settings):
-    sections = INPParser.parse(observed)
-    catalog = RainfallOptions.model_validate(rainfall_catalog(sections, "JJ", settings, "real"))
-    assert catalog.mode == "real"
-    assert catalog.read_only is True
-    assert catalog.duration_seconds == 172800
-    assert catalog.total_rainfall_mm == 226.2
-    assert catalog.series_name == "TS_REAL_20260913"
-    # Raw client data has no generated scenario marker or design backup.
-    assert ";@REAL_RAIN" not in observed
-    assert ";@DESIGN_BACKUP" not in observed
-    result, changes = apply_rainfall_scenario(observed, "JJ", settings, rainfall_mode="real")
-    assert result == observed
-    assert changes == []
-
-
-def test_laocheng_rejects_real_input(observed, settings):
-    with pytest.raises(ParameterValidationError, match="老城"):
-        apply_rainfall_scenario(observed, "LC", settings, rainfall_mode="real")
-
-
-@pytest.mark.parametrize("from_mode,to_mode", [("design", "real"), ("real", "design")])
-def test_parameter_save_cannot_switch_input(design, observed, settings, from_mode, to_mode):
-    content = observed if from_mode == "real" else design
-    with pytest.raises(ParameterValidationError, match="输入方案选择"):
-        apply_rainfall_scenario(
-            content, "JJ", settings, rainfall_options={"mode": to_mode}, rainfall_mode=from_mode
-        )
-
-
-def test_engineering_and_report_step_edits_preserve_observed_series(observed, settings):
+def test_legacy_real_input_remains_readable_and_engineering_edits_preserve_series(
+    observed, settings
+):
     before = INPParser.parse(observed)
+    catalog = RainfallOptions.model_validate(rainfall_catalog(before, "JJ", settings, "real"))
+    assert catalog.mode == "real"
+    assert catalog.total_rainfall_mm == 226.2
     target = next(line.split()[0] for line in before["CONDUITS"] if not line.startswith(";"))
-    adjusted, engineering_changes = apply_parameter_changes(
+    adjusted, _ = apply_parameter_changes(
         observed,
         [{"section": "CONDUITS", "target": target, "field": "roughness", "new_value": "0.02"}],
     )
-    saved, changes = apply_rainfall_scenario(adjusted, "JJ", settings, rainfall_mode="real")
-    assert saved == adjusted
-    assert engineering_changes and not changes
     saved, changes = apply_rainfall_scenario(
-        saved,
+        adjusted,
         "JJ",
         settings,
-        simulation_options={"duration_seconds": 172800, "report_step_seconds": 600},
+        {"duration_seconds": 172800, "report_step_seconds": 600},
         rainfall_mode="real",
     )
     after = INPParser.parse(saved)
     assert after["TIMESERIES"] == before["TIMESERIES"]
     assert after["RAINGAGES"] == before["RAINGAGES"]
-    assert build_simulation_options(after, settings)["report_step_seconds"] == 600
+    assert [change["target"] for change in changes] == ["REPORT_STEP"]
+
+
+def test_design_to_real_retains_engineering_and_model_dates(design, settings):
+    content, _ = apply_rainfall_scenario(
+        design,
+        "JJ",
+        settings,
+        {"duration_seconds": 172800, "report_step_seconds": 300},
+        {"mode": "real", "event_id": EVENT_ID},
+    )
+    before, after = INPParser.parse(design), INPParser.parse(content)
+    for section in set(before) - {"OPTIONS", "RAINGAGES", "TIMESERIES"}:
+        assert before[section] == after[section]
+    simulation = build_simulation_options(after, settings)
+    assert simulation["start_datetime"] == "2025-07-15T00:00:00"
+    rain = rainfall_catalog(after, "JJ", settings)
+    assert rain["mode"] == "real" and rain["total_rainfall_mm"] == 226.2
+    assert rain["values_mm"] == real_event()["values_mm"]
+    # Re-submitting the exact same rain does not generate a spurious version.
+    unchanged, changes = apply_rainfall_scenario(
+        content, "JJ", settings, rainfall_options={"mode": "real", "event_id": EVENT_ID}
+    )
+    assert unchanged == content and changes == []
+
+
+def test_real_can_be_replaced_with_design_or_custom(observed, settings):
+    for request in [
+        {"mode": "design", "start_seconds": 300, "duration_seconds": 600, "total_rainfall_mm": 5},
+        {"mode": "custom", "start_seconds": 17, "time_step_seconds": 61, "values_mm": [0, 1, 2, 0]},
+    ]:
+        content, changes = apply_rainfall_scenario(
+            observed, "JJ", settings, rainfall_options=request, rainfall_mode="real"
+        )
+        rain = rainfall_catalog(INPParser.parse(content), "JJ", settings, "real")
+        assert rain["mode"] == request["mode"]
+        assert changes
+        assert rain["event_id"] is None
+        if request["mode"] == "custom":
+            assert rain["values_mm"] == [0, 1, 2, 0]
+            assert rain["duration_seconds"] == 244
+
+
+def test_same_total_and_duration_different_shape_is_a_change(design, settings):
+    request = {
+        "mode": "custom",
+        "start_seconds": 0,
+        "time_step_seconds": 300,
+        "values_mm": [1, 2, 0],
+    }
+    first, _ = apply_rainfall_scenario(design, "JJ", settings, rainfall_options=request)
+    second, changes = apply_rainfall_scenario(
+        first, "JJ", settings, rainfall_options={**request, "values_mm": [2, 1, 0]}
+    )
+    a, b = [
+        rainfall_catalog(INPParser.parse(content), "JJ", settings) for content in [first, second]
+    ]
+    assert a["total_rainfall_mm"] == b["total_rainfall_mm"] == 3
+    assert a["duration_seconds"] == b["duration_seconds"]
+    assert a["series_checksum"] != b["series_checksum"]
+    assert len(changes) == 1
+
+
+def test_only_rain_series_is_replaced_and_zero_rain_is_valid(design, settings):
+    content = design.replace("[TIMESERIES]", "[TIMESERIES]\nTIDE 07/15/2025 00:00:00 0.5")
+    adjusted, _ = apply_rainfall_scenario(
+        content,
+        "JJ",
+        settings,
+        rainfall_options={
+            "mode": "custom",
+            "start_seconds": 0,
+            "time_step_seconds": 300,
+            "values_mm": [0, 0],
+        },
+    )
+    assert "TIDE 07/15/2025 00:00:00 0.5" in adjusted
+    rain = rainfall_catalog(INPParser.parse(adjusted), "JJ", settings)
+    assert rain["values_mm"] == [0, 0] and rain["total_rainfall_mm"] == 0
 
 
 @pytest.mark.parametrize(
-    "rain,simulation,message",
-    [
-        ({"mode": "real", "total_rainfall_mm": 300.0}, None, "不可修改"),
-        ({"mode": "real", "start_seconds": 300}, None, "不可修改"),
-        ({"mode": "real", "duration_seconds": 3600}, None, "不可修改"),
-        ({"mode": "real", "event_id": "unknown"}, None, "不支持"),
-        (None, {"duration_seconds": 86400, "report_step_seconds": 300}, "固定"),
-    ],
+    "values", [[-1], [float("nan")], [float("inf")], [True], ["1"], [], [1] * 10001]
 )
-def test_real_conditions_cannot_be_overridden(observed, settings, rain, simulation, message):
-    with pytest.raises(ParameterValidationError, match=message):
-        apply_rainfall_scenario(observed, "JJ", settings, simulation, rain, rainfall_mode="real")
-
-
-@pytest.mark.parametrize("seed", STUDY_AREA_SEEDS)
-def test_both_design_inputs_allow_two_days_and_reject_longer(seed, settings):
-    content = seed.inp_path.read_text(encoding="utf-8")
-    result, _ = apply_rainfall_scenario(
-        content,
-        seed.name,
-        settings,
-        {
-            "duration_seconds": 172800,
-            "report_step_seconds": 300,
-        },
-    )
-    assert build_simulation_options(INPParser.parse(result), settings)["duration_seconds"] == 172800
-    with pytest.raises(ParameterValidationError, match="172800"):
-        apply_simulation_options(
-            content,
-            INPParser.parse(content),
-            {
-                "duration_seconds": 172801,
-                "report_step_seconds": 300,
-            },
-            settings,
+def test_bad_custom_values_are_rejected_by_contract(values):
+    with pytest.raises(ValidationError):
+        RainfallOptionsInput(
+            mode="custom", start_seconds=0, time_step_seconds=300, values_mm=values
         )
 
 
-def test_contract_accepts_real_validation_and_legacy_design_payloads():
+@pytest.mark.parametrize("mode", ["real", "custom"])
+def test_no_silent_duration_or_output_step_change(design, settings, mode):
+    request = (
+        {"mode": "real", "event_id": EVENT_ID}
+        if mode == "real"
+        else {"mode": "custom", "start_seconds": 0, "time_step_seconds": 300, "values_mm": [1] * 13}
+    )
+    with pytest.raises(ParameterValidationError, match="超过模拟时长"):
+        apply_rainfall_scenario(design, "JJ", settings, rainfall_options=request)
+
+
+def test_cannot_shorten_duration_without_replacing_rain(observed, settings):
+    with pytest.raises(ParameterValidationError, match="现有降雨序列"):
+        apply_rainfall_scenario(
+            observed,
+            "JJ",
+            settings,
+            {"duration_seconds": 3600, "report_step_seconds": 300},
+            rainfall_mode="real",
+        )
+    # Replacement in the same save can make the new duration valid.
+    content, _ = apply_rainfall_scenario(
+        observed,
+        "JJ",
+        settings,
+        {"duration_seconds": 3600, "report_step_seconds": 300},
+        {"mode": "custom", "start_seconds": 0, "time_step_seconds": 300, "values_mm": [1, 0]},
+        rainfall_mode="real",
+    )
+    assert build_simulation_options(INPParser.parse(content), settings)["duration_seconds"] == 3600
+
+
+def test_laocheng_supports_custom_but_not_jinjiang_event(settings):
+    content = STUDY_AREA_SEEDS[0].inp_path.read_text(encoding="utf-8")
+    apply_rainfall_scenario(
+        content,
+        "LC",
+        settings,
+        rainfall_options={
+            "mode": "custom",
+            "start_seconds": 0,
+            "time_step_seconds": 300,
+            "values_mm": [1, 0],
+        },
+    )
+    with pytest.raises(ParameterValidationError, match="老城"):
+        prepare_rainfall({"mode": "real", "event_id": EVENT_ID}, "LC", 172800)
+
+
+def test_contract_and_legacy_metadata():
     assert RainfallOptionsInput(mode="real", event_id=EVENT_ID).mode == "real"
     assert (
-        RainfallOptionsInput(start_seconds=0, duration_seconds=3600, total_rainfall_mm=50.0).mode
+        RainfallOptionsInput(start_seconds=0, duration_seconds=3600, total_rainfall_mm=50).mode
         == "design"
     )
-    with pytest.raises(ValidationError):
-        RainfallOptionsInput(mode="design")
-    assert Settings.model_fields["simulation_duration_max_seconds"].default == 172800
     assert ModelVersion(change_summary=None).rainfall_mode == "design"
-    assert ModelVersion(change_summary={"rainfall_mode": "real"}).rainfall_mode == "real"
+    assert ModelVersion(change_summary={"rainfall_mode": "custom"}).rainfall_mode == "custom"
+    assert Settings.model_fields["simulation_duration_max_seconds"].default == 172800
 
 
-def test_volume_and_reset_cumulative_statistics():
-    content = """[OPTIONS]
-FLOW_UNITS LPS
-START_DATE 09/13/2026
-START_TIME 00:00:00
-[RAINGAGES]
-G1 CUMULATIVE 00:05 1 TIMESERIES RAIN
-[TIMESERIES]
-RAIN 09/13/2026 00:00:00 2
-RAIN 09/13/2026 00:05:00 5
-RAIN 09/13/2026 00:10:00 1
-"""
-    cumulative = build_rainfall_options(INPParser.parse(content), 3600)
-    assert cumulative["total_rainfall_mm"] == 6
-    assert cumulative["peak_rainfall_mm_h"] == 36
-    volume = build_rainfall_options(INPParser.parse(content.replace("CUMULATIVE", "VOLUME")), 3600)
-    assert volume["total_rainfall_mm"] == 8
-    assert volume["peak_rainfall_mm_h"] == 60
+@pytest.mark.parametrize("start,step", [(17, 61), (75, 61), (0, 300)])
+def test_custom_series_runs_in_swmm_engine_with_exact_total(
+    design, settings, tmp_path, start, step
+):
+    from swmm.toolkit import solver
+
+    content, _ = apply_rainfall_scenario(
+        design,
+        "JJ",
+        settings,
+        rainfall_options={
+            "mode": "custom",
+            "start_seconds": start,
+            "time_step_seconds": step,
+            "values_mm": [0, 1, 2, 0],
+        },
+    )
+    inp = tmp_path / "custom.inp"
+    inp.write_text(content, encoding="utf-8")
+    solver.swmm_run(str(inp), str(inp.with_suffix(".rpt")), str(inp.with_suffix(".out")))
+    report = inp.with_suffix(".rpt").read_text(encoding="utf-8")
+    assert "ERROR" not in report
+    precipitation = next(line for line in report.splitlines() if "Total Precipitation" in line)
+    assert float(precipitation.split()[-1]) == pytest.approx(3.0, abs=0.001)
 
 
 class MemoryStorage:
@@ -224,7 +295,7 @@ class MemorySession:
         return self.model if kind is SwmmModel else self.versions.get(key)
 
     def scalar(self, query):
-        return max((v.version for v in self.versions.values()), default=7)
+        return max((v.version for v in self.versions.values()), default=0)
 
     def add(self, item):
         self.versions[item.id] = item
@@ -242,40 +313,52 @@ class MemorySession:
         pass
 
 
-def test_observed_input_is_seeded_once_with_full_original_bytes(settings):
+def test_service_switches_source_on_current_engineering_version_and_preserves_history(
+    design, settings
+):
     service = object.__new__(ModelService)
-    service.settings = settings
-    service.storage = MemoryStorage()
+    service.settings, service.storage = settings, MemoryStorage()
     session = MemorySession()
-    baseline = service._ensure_real_input(session)
-    again = service._ensure_real_input(session)
-    assert again is baseline
-    assert len(service.storage.uploads) == 1
-    assert service.storage.files[str(JJ_REAL_VERSION_ID)] == JJ_REAL_INPUT_PATH.read_bytes()
-    assert baseline.parent_version_id is None
-    assert baseline.rainfall_mode == "real"
-    assert baseline.version == 8  # Do not overwrite any existing version number.
-    assert session.parameter_changes == []
-
-
-def test_engineering_save_inherits_real_input_and_parent(settings):
-    service = object.__new__(ModelService)
-    service.settings = settings
-    service.storage = MemoryStorage()
-    session = MemorySession()
-    baseline = service._ensure_real_input(session)
+    seed = STUDY_AREA_SEEDS[1]
+    parent = ModelVersion(
+        id=seed.version_id,
+        model_id=seed.model_id,
+        version=3,
+        inp_bucket="test",
+        inp_object_key=str(seed.version_id),
+        change_summary={"rainfall_mode": "design"},
+    )
+    session.versions[parent.id] = parent
+    original = design.encode()
+    service.storage.files[parent.inp_object_key] = original
     service.get_version = lambda session, version_id: session.versions[version_id]
-    source = INPParser.parse(JJ_REAL_INPUT_PATH.read_text(encoding="utf-8"))
-    target = next(line.split()[0] for line in source["CONDUITS"] if not line.startswith(";"))
+    before = INPParser.parse(design)
+    target = next(line.split()[0] for line in before["CONDUITS"] if not line.startswith(";"))
     version, changes = service.create_adjusted_version(
         session,
-        baseline.id,
+        parent.id,
         [{"section": "CONDUITS", "target": target, "field": "roughness", "new_value": "0.02"}],
+        rainfall_options={
+            "mode": "custom",
+            "start_seconds": 0,
+            "time_step_seconds": 300,
+            "values_mm": [1, 2, 0],
+        },
     )
-    assert version.parent_version_id == baseline.id
-    assert version.rainfall_mode == "real"
-    assert version.version == 9
-    adjusted = INPParser.parse(service.storage.files[str(version.id)].decode("utf-8"))
-    assert adjusted["TIMESERIES"] == source["TIMESERIES"]
-    assert adjusted["RAINGAGES"] == source["RAINGAGES"]
-    assert [item["field"] for item in changes] == ["roughness"]
+    assert version.parent_version_id == parent.id and version.version == 4
+    assert version.rainfall_mode == "custom"
+    assert service.storage.files[parent.inp_object_key] == original
+    assert {change["field"] for change in changes} == {"roughness", "rainfall_series"}
+    first_bytes = service.storage.files[str(version.id)]
+    # Engineering-only derivation leaves the custom rainfall byte-for-byte unchanged.
+    newer, _ = service.create_adjusted_version(
+        session,
+        version.id,
+        [{"section": "CONDUITS", "target": target, "field": "roughness", "new_value": "0.03"}],
+    )
+    a, b = [
+        INPParser.parse(data.decode())
+        for data in [first_bytes, service.storage.files[str(newer.id)]]
+    ]
+    assert a["TIMESERIES"] == b["TIMESERIES"] and a["RAINGAGES"] == b["RAINGAGES"]
+    assert newer.rainfall_mode == "custom"

@@ -17,7 +17,7 @@ class ModelVersionRead(BaseModel):
     change_summary: Optional[dict[str, Any]]
     created_by: Optional[str]
     created_at: datetime
-    rainfall_mode: Literal["design", "real"] = "design"
+    rainfall_mode: Literal["design", "real", "custom"] = "design"
 
 
 class ModelRead(BaseModel):
@@ -42,6 +42,7 @@ class ModelListItem(ModelRead):
     version_count: int
     latest_version: Optional[int]
     rainfall_inputs: list[RainfallInputRead]
+    baseline_version_id: UUID
 
 
 class StudyAreaLatestVersion(BaseModel):

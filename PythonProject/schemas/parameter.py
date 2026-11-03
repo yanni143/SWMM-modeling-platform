@@ -1,7 +1,8 @@
-from typing import Literal, Optional
+import math
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from schemas.model import ModelVersionRead
 
@@ -56,6 +57,7 @@ class RealRainfallEvent(BaseModel):
     total_rainfall_mm: float
     peak_rainfall_mm_h: float
     time_step_seconds: int
+    values_mm: list[float]
 
 
 class RainfallOptions(BaseModel):
@@ -69,10 +71,12 @@ class RainfallOptions(BaseModel):
     time_step_seconds: int
     peak_ratio: float
     formula: str
-    mode: Literal["design", "real"] = "design"
-    event_id: Optional[str] = None
+    mode: Literal["design", "real", "custom"] = "design"
+    event_id: str | None = None
     read_only: bool = False
-    real_event: Optional[RealRainfallEvent] = None
+    real_event: RealRainfallEvent | None = None
+    values_mm: list[float]
+    series_checksum: str
 
 
 class ParameterCatalogResponse(BaseModel):
@@ -95,11 +99,16 @@ class SimulationOptionsInput(BaseModel):
 
 
 class RainfallOptionsInput(BaseModel):
-    mode: Literal["design", "real"] = "design"
-    event_id: Optional[str] = Field(default=None, max_length=100)
-    start_seconds: Optional[int] = Field(default=None, strict=True, ge=0)
-    duration_seconds: Optional[int] = Field(default=None, strict=True, gt=0)
-    total_rainfall_mm: Optional[float] = Field(default=None, strict=True, gt=0, allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["design", "real", "custom"] = "design"
+    event_id: str | None = Field(default=None, max_length=100)
+    start_seconds: int | None = Field(default=None, strict=True, ge=0)
+    duration_seconds: int | None = Field(default=None, strict=True, gt=0)
+    total_rainfall_mm: float | None = Field(default=None, strict=True, gt=0, allow_inf_nan=False)
+    time_step_seconds: int | None = Field(default=None, strict=True, gt=0)
+    values_mm: list[Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]] | None = Field(
+        default=None, min_length=1, max_length=10000
+    )
 
     @model_validator(mode="after")
     def validate_mode(self):
@@ -111,15 +120,67 @@ class RainfallOptionsInput(BaseModel):
                 for value in (self.start_seconds, self.duration_seconds, self.total_rainfall_mm)
             ):
                 raise ValueError("模拟降雨必须提供开始时间、时长和总雨量")
+            if self.values_mm is not None or self.time_step_seconds is not None:
+                raise ValueError("芝加哥雨型不接受自定义序列")
+        elif self.mode == "real":
+            if not self.event_id:
+                raise ValueError("请选择真实降雨事件")
+            if any(
+                value is not None
+                for value in (
+                    self.duration_seconds,
+                    self.total_rainfall_mm,
+                    self.time_step_seconds,
+                    self.values_mm,
+                )
+            ):
+                raise ValueError("真实降雨序列不可修改；如需编辑请使用自定义序列")
+        else:
+            if (
+                self.start_seconds is None
+                or self.time_step_seconds is None
+                or self.values_mm is None
+            ):
+                raise ValueError("自定义降雨必须提供开始时间、记录间隔和分段雨量序列")
+            if any(
+                value is not None
+                for value in (
+                    self.event_id,
+                    self.duration_seconds,
+                    self.total_rainfall_mm,
+                )
+            ):
+                raise ValueError("自定义降雨的时长和总雨量由序列计算")
+            if any(not math.isfinite(value) or value < 0 for value in self.values_mm):
+                raise ValueError("分段雨量必须是不小于 0 的有限数值")
         return self
 
 
+class RainfallPreviewRequest(BaseModel):
+    study_area: Literal["LC", "JJ"]
+    simulation_duration_seconds: int = Field(strict=True, gt=0)
+    rainfall_options: RainfallOptionsInput
+
+
+class RainfallPreview(BaseModel):
+    mode: Literal["design", "real", "custom"]
+    event_id: str | None
+    start_seconds: int
+    duration_seconds: int
+    end_seconds: int
+    time_step_seconds: int
+    values_mm: list[float]
+    total_rainfall_mm: float
+    peak_rainfall_mm_h: float
+    series_checksum: str
+
+
 class CreateAdjustedVersionRequest(BaseModel):
-    summary: Optional[str] = Field(default=None, max_length=500)
-    created_by: Optional[str] = Field(default=None, max_length=100)
+    summary: str | None = Field(default=None, max_length=500)
+    created_by: str | None = Field(default=None, max_length=100)
     changes: list[ParameterChangeInput] = Field(default_factory=list, max_length=5000)
-    simulation_options: Optional[SimulationOptionsInput] = None
-    rainfall_options: Optional[RainfallOptionsInput] = None
+    simulation_options: SimulationOptionsInput | None = None
+    rainfall_options: RainfallOptionsInput | None = None
 
     @model_validator(mode="after")
     def require_changes(self):
